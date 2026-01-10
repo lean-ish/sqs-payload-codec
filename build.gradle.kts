@@ -78,6 +78,8 @@ tasks.withType<Test>().configureEach {
 }
 
 tasks.withType<JavaCompile>().configureEach {
+    // Required from errorprone 2.46.0+ on JDK 21
+    options.compilerArgs.add("-XDaddTypeAnnotationsToSymbol=true")
     options.errorprone {
         disableWarningsInGeneratedCode.set(true)
         errorproneArgs.addAll(
