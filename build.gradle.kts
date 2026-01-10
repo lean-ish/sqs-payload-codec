@@ -62,7 +62,7 @@ dependencies {
     // IDE test runners use the launcher when not delegating to Gradle.
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    errorprone("com.google.errorprone:error_prone_core:2.45.0")
+    errorprone("com.google.errorprone:error_prone_core:2.46.0")
     errorprone("com.uber.nullaway:nullaway:0.12.15")
 }
 
