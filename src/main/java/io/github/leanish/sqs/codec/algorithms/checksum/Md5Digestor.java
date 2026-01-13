@@ -9,17 +9,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 
-import io.github.leanish.sqs.codec.PayloadCodecException;
-import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
-
+/**
+ * MD5 digest implementation.
+ */
 public final class Md5Digestor implements Digestor {
 
     private static final Base64.Encoder BASE64_ENCODER = Base64.getUrlEncoder();
-
-    @Override
-    public ChecksumAlgorithm algorithm() {
-        return ChecksumAlgorithm.MD5;
-    }
 
     @Override
     public String checksum(byte[] payload) {
@@ -32,7 +27,7 @@ public final class Md5Digestor implements Digestor {
         try {
             return MessageDigest.getInstance("MD5");
         } catch (NoSuchAlgorithmException e) {
-            throw new PayloadCodecException("MD5 digest is not available", e);
+            throw new UnavailableAlgorithmException("MD5 digest is not available", e);
         }
     }
 }

@@ -5,7 +5,10 @@
  */
 package io.github.leanish.sqs.codec;
 
-public final class PayloadCodecException extends RuntimeException {
+/**
+ * Base runtime exception for errors raised by the SQS payload codec.
+ */
+public class PayloadCodecException extends RuntimeException {
 
     public PayloadCodecException(String message) {
         super(message);

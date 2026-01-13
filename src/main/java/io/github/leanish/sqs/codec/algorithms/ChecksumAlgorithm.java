@@ -7,12 +7,14 @@ package io.github.leanish.sqs.codec.algorithms;
 
 import org.apache.commons.lang3.StringUtils;
 
-import io.github.leanish.sqs.codec.PayloadCodecException;
 import io.github.leanish.sqs.codec.algorithms.checksum.Digestor;
 import io.github.leanish.sqs.codec.algorithms.checksum.Md5Digestor;
 import io.github.leanish.sqs.codec.algorithms.checksum.Sha256Digestor;
 import io.github.leanish.sqs.codec.algorithms.checksum.UndigestedDigestor;
 
+/**
+ * Supported checksum algorithms and their digestor implementations.
+ */
 public enum ChecksumAlgorithm {
     /** MD5 checksum for lightweight integrity checks. */
     MD5("md5"),
@@ -35,16 +37,16 @@ public enum ChecksumAlgorithm {
         return id;
     }
 
-    public static ChecksumAlgorithm fromAttributeValue(String value) {
+    public static ChecksumAlgorithm fromId(String value) {
         if (StringUtils.isBlank(value)) {
-            throw new PayloadCodecException("Unsupported checksum algorithm: " + value);
+            throw UnsupportedAlgorithmException.checksum(value);
         }
         for (ChecksumAlgorithm algorithm : values()) {
             if (algorithm.id.equalsIgnoreCase(value)) {
                 return algorithm;
             }
         }
-        throw new PayloadCodecException("Unsupported checksum algorithm: " + value);
+        throw UnsupportedAlgorithmException.checksum(value);
     }
 
     public Digestor digestor() {

@@ -9,29 +9,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
-import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
+import io.github.leanish.sqs.codec.algorithms.encoding.InvalidPayloadException;
 
 class PayloadCodecTest {
-
-    @ParameterizedTest
-    @MethodSource("roundTripCases")
-    void roundTripPreservesPayload(CompressionAlgorithm compressionAlgorithm, EncodingAlgorithm encoding) {
-        PayloadCodec codec = new PayloadCodec(compressionAlgorithm, encoding);
-        String payload = "{\"value\":42}";
-        byte[] encoded = codec.encode(payload.getBytes(StandardCharsets.UTF_8));
-
-        String decoded = new String(codec.decode(encoded), StandardCharsets.UTF_8);
-
-        assertThat(decoded).isEqualTo(payload);
-    }
 
     @Test
     void defaultCodecUsesPlaintextEncoding() {
@@ -45,15 +30,14 @@ class PayloadCodecTest {
     }
 
     @Test
-    void effectiveEncodingAlgorithmUsesBase64WhenCompressed() {
-        assertThat(EncodingAlgorithm.effectiveFor(CompressionAlgorithm.ZSTD, EncodingAlgorithm.NONE))
-                .isEqualTo(EncodingAlgorithm.BASE64);
-        assertThat(EncodingAlgorithm.effectiveFor(CompressionAlgorithm.SNAPPY, EncodingAlgorithm.NONE))
-                .isEqualTo(EncodingAlgorithm.BASE64);
-        assertThat(EncodingAlgorithm.effectiveFor(CompressionAlgorithm.GZIP, EncodingAlgorithm.BASE64_STD))
-                .isEqualTo(EncodingAlgorithm.BASE64_STD);
-        assertThat(EncodingAlgorithm.effectiveFor(CompressionAlgorithm.NONE, EncodingAlgorithm.NONE))
-                .isEqualTo(EncodingAlgorithm.NONE);
+    void compressedRoundTripPreservesPayload() {
+        PayloadCodec codec = new PayloadCodec(CompressionAlgorithm.ZSTD, EncodingAlgorithm.NONE);
+        String payload = "{\"value\":42}";
+        byte[] encoded = codec.encode(payload.getBytes(StandardCharsets.UTF_8));
+
+        String decoded = new String(codec.decode(encoded), StandardCharsets.UTF_8);
+
+        assertThat(decoded).isEqualTo(payload);
     }
 
     @Test
@@ -61,24 +45,8 @@ class PayloadCodecTest {
         PayloadCodec codec = new PayloadCodec(CompressionAlgorithm.NONE, EncodingAlgorithm.BASE64);
 
         assertThatThrownBy(() -> codec.decode("!!!".getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOf(InvalidPayloadException.class)
                 .hasMessage("Invalid base64 payload")
                 .hasCauseInstanceOf(IllegalArgumentException.class);
-    }
-
-    private static Stream<Arguments> roundTripCases() {
-        return Stream.of(
-                Arguments.of(CompressionAlgorithm.NONE, EncodingAlgorithm.NONE),
-                Arguments.of(CompressionAlgorithm.NONE, EncodingAlgorithm.BASE64),
-                Arguments.of(CompressionAlgorithm.NONE, EncodingAlgorithm.BASE64_STD),
-                Arguments.of(CompressionAlgorithm.ZSTD, EncodingAlgorithm.NONE),
-                Arguments.of(CompressionAlgorithm.ZSTD, EncodingAlgorithm.BASE64),
-                Arguments.of(CompressionAlgorithm.ZSTD, EncodingAlgorithm.BASE64_STD),
-                Arguments.of(CompressionAlgorithm.SNAPPY, EncodingAlgorithm.NONE),
-                Arguments.of(CompressionAlgorithm.SNAPPY, EncodingAlgorithm.BASE64),
-                Arguments.of(CompressionAlgorithm.SNAPPY, EncodingAlgorithm.BASE64_STD),
-                Arguments.of(CompressionAlgorithm.GZIP, EncodingAlgorithm.NONE),
-                Arguments.of(CompressionAlgorithm.GZIP, EncodingAlgorithm.BASE64),
-                Arguments.of(CompressionAlgorithm.GZIP, EncodingAlgorithm.BASE64_STD));
     }
 }

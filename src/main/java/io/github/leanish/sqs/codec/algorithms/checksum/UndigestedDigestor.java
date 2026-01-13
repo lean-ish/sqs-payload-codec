@@ -5,18 +5,13 @@
  */
 package io.github.leanish.sqs.codec.algorithms.checksum;
 
-import io.github.leanish.sqs.codec.PayloadCodecException;
-import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
-
+/**
+ * Digestor implementation that always throws for NONE.
+ */
 public final class UndigestedDigestor implements Digestor {
 
     @Override
-    public ChecksumAlgorithm algorithm() {
-        return ChecksumAlgorithm.NONE;
-    }
-
-    @Override
     public String checksum(byte[] payload) {
-        throw new PayloadCodecException("Digestor algorithm is none");
+        throw new UnavailableAlgorithmException("Digestor algorithm is none");
     }
 }

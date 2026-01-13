@@ -12,56 +12,50 @@ import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.Test;
 
-import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.encoding.Base64Encoder;
+import io.github.leanish.sqs.codec.algorithms.encoding.InvalidPayloadException;
+import io.github.leanish.sqs.codec.algorithms.encoding.NoOpEncoder;
 import io.github.leanish.sqs.codec.algorithms.encoding.StandardBase64Encoder;
-import io.github.leanish.sqs.codec.algorithms.encoding.UnencodedEncoder;
 
 class EncodingTest {
 
     private final Base64Encoder urlEncoder = new Base64Encoder();
     private final StandardBase64Encoder standardEncoder = new StandardBase64Encoder();
-    private final UnencodedEncoder unencodedEncoder = new UnencodedEncoder();
+    private final NoOpEncoder noOpEncoder = new NoOpEncoder();
 
+    // just a few tests as SqsPayloadCodecInterceptorIntegrationTest covers most cases already
     @Test
-    void base64EncodersExposeAlgorithms() {
-        assertThat(urlEncoder.algorithm()).isEqualTo(EncodingAlgorithm.BASE64);
-        assertThat(standardEncoder.algorithm()).isEqualTo(EncodingAlgorithm.BASE64_STD);
-        assertThat(unencodedEncoder.algorithm()).isEqualTo(EncodingAlgorithm.NONE);
-    }
-
-    @Test
-    void base64VariantsEncodeDifferently() {
-        byte[] payload = new byte[] {(byte) 0xfb, (byte) 0xef, (byte) 0xff};
-
-        assertThat(new String(urlEncoder.encode(payload), StandardCharsets.UTF_8)).isEqualTo("--__");
-        assertThat(new String(standardEncoder.encode(payload), StandardCharsets.UTF_8)).isEqualTo("++//");
-    }
-
-    @Test
-    void unencodedEncoderPassesThroughBytes() {
+    void noOp() {
         String payload = "payload-42";
 
-        byte[] encoded = unencodedEncoder.encode(payload.getBytes(StandardCharsets.UTF_8));
-        byte[] decoded = unencodedEncoder.decode(encoded);
+        byte[] encoded = noOpEncoder.encode(payload.getBytes(StandardCharsets.UTF_8));
+        byte[] decoded = noOpEncoder.decode(encoded);
 
         assertThat(new String(encoded, StandardCharsets.UTF_8)).isEqualTo(payload);
         assertThat(new String(decoded, StandardCharsets.UTF_8)).isEqualTo(payload);
     }
 
     @Test
-    void urlSafeBase64RejectsInvalidPayload() {
+    void base64_invalidPayload() {
         assertThatThrownBy(() -> urlEncoder.decode("!@#".getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOf(InvalidPayloadException.class)
                 .hasMessage("Invalid base64 payload")
                 .hasCauseInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void standardBase64RejectsInvalidPayload() {
+    void base64Standard_invalid() {
         assertThatThrownBy(() -> standardEncoder.decode("[]".getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOf(InvalidPayloadException.class)
                 .hasMessage("Invalid base64 payload")
                 .hasCauseInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void base64VariantsDifferences() {
+        byte[] payload = new byte[] {(byte) 0xfb, (byte) 0xef, (byte) 0xff};
+
+        assertThat(new String(urlEncoder.encode(payload), StandardCharsets.UTF_8)).isEqualTo("--__");
+        assertThat(new String(standardEncoder.encode(payload), StandardCharsets.UTF_8)).isEqualTo("++//");
     }
 }

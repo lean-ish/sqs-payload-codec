@@ -5,14 +5,10 @@
  */
 package io.github.leanish.sqs.codec.algorithms.compression;
 
-import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
-
-public final class UncompressedCompressor implements Compressor {
-
-    @Override
-    public CompressionAlgorithm algorithm() {
-        return CompressionAlgorithm.NONE;
-    }
+/**
+ * No-op compressor that passes payload bytes through unchanged.
+ */
+public final class NoOpCompressor implements Compressor {
 
     @Override
     public byte[] compress(byte[] payload) {

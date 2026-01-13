@@ -5,37 +5,41 @@
  */
 package io.github.leanish.sqs.codec.attributes;
 
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
-import org.jspecify.annotations.Nullable;
 
 import io.github.leanish.sqs.codec.PayloadCodecConfiguration;
-import io.github.leanish.sqs.codec.PayloadCodecException;
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 
+/**
+ * Parses and writes codec configuration attributes for SQS messages.
+ */
 public final class PayloadCodecConfigurationAttributeHandler {
 
     private final PayloadCodecConfiguration configuration;
-    private final int version;
-    // Preserve the raw attribute value to report exact unsupported algorithms.
-    private final @Nullable String checksumAlgorithmValue;
 
     private PayloadCodecConfigurationAttributeHandler(
-            PayloadCodecConfiguration configuration,
-            int version,
-            @Nullable String checksumAlgorithmValue) {
+            PayloadCodecConfiguration configuration) {
         this.configuration = configuration;
-        this.version = version;
-        this.checksumAlgorithmValue = checksumAlgorithmValue;
     }
 
     public static boolean hasCodecAttributes(Map<String, MessageAttributeValue> attributes) {
-        return hasNonBlankAttribute(attributes, PayloadCodecAttributes.COMPRESSION_ALG)
-                || hasNonBlankAttribute(attributes, PayloadCodecAttributes.ENCODING_ALG);
+        return hasNonBlankAttribute(attributes, PayloadCodecAttributes.CONF);
+    }
+
+    public static boolean hasConfigurationAttributes(Map<String, MessageAttributeValue> attributes) {
+        return attributes.containsKey(PayloadCodecAttributes.CONF);
+    }
+
+    public static boolean hasAnyAttributes(Map<String, MessageAttributeValue> attributes) {
+        return hasConfigurationAttributes(attributes)
+                || PayloadChecksumAttributeHandler.hasAttributes(attributes);
     }
 
     public static PayloadCodecConfigurationAttributeHandler forOutbound(PayloadCodecConfiguration configuration) {
@@ -43,60 +47,29 @@ public final class PayloadCodecConfigurationAttributeHandler {
                 configuration.compressionAlgorithm(),
                 configuration.encodingAlgorithm());
         PayloadCodecConfiguration effectiveConfiguration = new PayloadCodecConfiguration(
+                configuration.version(),
                 configuration.compressionAlgorithm(),
                 effectiveEncoding,
                 configuration.checksumAlgorithm());
-        String checksumAlgorithmId = "";
-        if (configuration.checksumAlgorithm() != ChecksumAlgorithm.NONE) {
-            checksumAlgorithmId = configuration.checksumAlgorithm().id();
-        }
         return new PayloadCodecConfigurationAttributeHandler(
-                effectiveConfiguration,
-                PayloadCodecAttributes.VERSION_VALUE,
-                checksumAlgorithmId);
+                effectiveConfiguration);
     }
 
     public static PayloadCodecConfigurationAttributeHandler fromAttributes(Map<String, MessageAttributeValue> attributes) {
-        String compressionValue = MessageAttributeUtils.attributeValue(attributes, PayloadCodecAttributes.COMPRESSION_ALG);
-        String encodingValue = MessageAttributeUtils.attributeValue(attributes, PayloadCodecAttributes.ENCODING_ALG);
-        CompressionAlgorithm compressionAlgorithm = CompressionAlgorithm.NONE;
-        if (StringUtils.isNotBlank(compressionValue)) {
-            compressionAlgorithm = compressionFromAttributeValue(compressionValue);
-        }
-        EncodingAlgorithm encodingAlgorithm = EncodingAlgorithm.NONE;
-        if (StringUtils.isNotBlank(encodingValue)) {
-            encodingAlgorithm = encodingFromAttributeValue(encodingValue);
-        }
-        if (compressionAlgorithm != CompressionAlgorithm.NONE
-                && encodingAlgorithm == EncodingAlgorithm.NONE
-                && StringUtils.isNotBlank(encodingValue)) {
-            throw new PayloadCodecException("Unsupported payload encoding: " + encodingValue);
-        }
-        String versionValue = MessageAttributeUtils.attributeValue(attributes, PayloadCodecAttributes.VERSION);
-        int version = PayloadCodecAttributes.VERSION_VALUE;
-        if (StringUtils.isNotBlank(versionValue)) {
-            try {
-                version = Integer.parseInt(versionValue);
-            } catch (NumberFormatException e) {
-                throw new PayloadCodecException("Unsupported codec version: " + versionValue);
+        String confValue = MessageAttributeUtils.attributeValue(attributes, PayloadCodecAttributes.CONF);
+        if (attributes.containsKey(PayloadCodecAttributes.CONF)) {
+            if (StringUtils.isBlank(confValue)) {
+                throw UnsupportedCodecConfigurationException.malformed(String.valueOf(confValue));
             }
-            if (version != PayloadCodecAttributes.VERSION_VALUE) {
-                throw new PayloadCodecException("Unsupported codec version: " + versionValue);
-            }
-        }
-        String checksumAlgorithmValue = MessageAttributeUtils.attributeValue(attributes, PayloadCodecAttributes.CHECKSUM_ALG);
-        ChecksumAlgorithm checksumAlgorithm = ChecksumAlgorithm.NONE;
-        if (StringUtils.isNotBlank(checksumAlgorithmValue)) {
-            checksumAlgorithm = ChecksumAlgorithm.fromAttributeValue(checksumAlgorithmValue);
+            PayloadCodecConfiguration configuration = parseConf(confValue);
+            return new PayloadCodecConfigurationAttributeHandler(configuration);
         }
         PayloadCodecConfiguration configuration = new PayloadCodecConfiguration(
-                compressionAlgorithm,
-                encodingAlgorithm,
-                checksumAlgorithm);
-        return new PayloadCodecConfigurationAttributeHandler(
-                configuration,
-                version,
-                checksumAlgorithmValue);
+                PayloadCodecAttributes.VERSION_VALUE,
+                CompressionAlgorithm.NONE,
+                EncodingAlgorithm.NONE,
+                ChecksumAlgorithm.NONE);
+        return new PayloadCodecConfigurationAttributeHandler(configuration);
     }
 
     public PayloadCodecConfiguration configuration() {
@@ -104,44 +77,79 @@ public final class PayloadCodecConfigurationAttributeHandler {
     }
 
     public void applyTo(Map<String, MessageAttributeValue> attributes) {
-        attributes.put(PayloadCodecAttributes.COMPRESSION_ALG,
-                MessageAttributeUtils.stringAttribute(configuration.compressionAlgorithm().id()));
-        attributes.put(PayloadCodecAttributes.ENCODING_ALG,
-                MessageAttributeUtils.stringAttribute(configuration.encodingAlgorithm().id()));
-        attributes.put(PayloadCodecAttributes.VERSION, MessageAttributeUtils.numberAttribute(version));
-        if (StringUtils.isNotBlank(checksumAlgorithmValue)) {
-            attributes.put(PayloadCodecAttributes.CHECKSUM_ALG,
-                    MessageAttributeUtils.stringAttribute(checksumAlgorithmValue));
-        }
-    }
-
-    public static CompressionAlgorithm compressionFromAttributeValue(String value) {
-        if (StringUtils.isBlank(value)) {
-            throw new PayloadCodecException("Unsupported payload compression: " + value);
-        }
-        for (CompressionAlgorithm compression : CompressionAlgorithm.values()) {
-            if (compression.id().equalsIgnoreCase(value)) {
-                return compression;
-            }
-        }
-
-        throw new PayloadCodecException("Unsupported payload compression: " + value);
-    }
-
-    public static EncodingAlgorithm encodingFromAttributeValue(String value) {
-        if (StringUtils.isBlank(value)) {
-            throw new PayloadCodecException("Unsupported payload encoding: " + value);
-        }
-        for (EncodingAlgorithm encoding : EncodingAlgorithm.values()) {
-            if (encoding.id().equalsIgnoreCase(value)) {
-                return encoding;
-            }
-        }
-        throw new PayloadCodecException("Unsupported payload encoding: " + value);
+        attributes.put(PayloadCodecAttributes.CONF,
+                MessageAttributeUtils.stringAttribute(formatConfValue(configuration)));
     }
 
     private static boolean hasNonBlankAttribute(Map<String, MessageAttributeValue> attributes, String name) {
         String value = MessageAttributeUtils.attributeValue(attributes, name);
         return StringUtils.isNotBlank(value);
+    }
+
+    private static PayloadCodecConfiguration parseConf(String confValue) {
+        String trimmed = confValue.trim();
+        if (trimmed.isEmpty()) {
+            throw UnsupportedCodecConfigurationException.malformed(confValue);
+        }
+
+        int version = PayloadCodecAttributes.VERSION_VALUE;
+        CompressionAlgorithm compressionAlgorithm = CompressionAlgorithm.NONE;
+        EncodingAlgorithm encodingAlgorithm = EncodingAlgorithm.NONE;
+        ChecksumAlgorithm checksumAlgorithm = ChecksumAlgorithm.NONE;
+
+        String[] parts = StringUtils.split(trimmed, ';');
+        Map<String, String> values = new HashMap<>();
+        for (String part : parts) {
+            String entry = part.trim();
+            if (entry.isEmpty()) {
+                continue;
+            }
+            int idx = entry.indexOf('=');
+            if (idx <= 0 || idx == entry.length() - 1) {
+                throw UnsupportedCodecConfigurationException.malformed(confValue);
+            }
+            String key = entry.substring(0, idx).trim().toLowerCase(Locale.ROOT);
+            String value = entry.substring(idx + 1).trim();
+            if (key.isEmpty() || value.isEmpty()) {
+                throw UnsupportedCodecConfigurationException.malformed(confValue);
+            }
+            if (values.putIfAbsent(key, value) != null) {
+                throw UnsupportedCodecConfigurationException.duplicateKey(key);
+            }
+        }
+
+        String versionValue = values.get("v");
+        if (versionValue != null) {
+            try {
+                version = Integer.parseInt(versionValue);
+            } catch (NumberFormatException e) {
+                throw UnsupportedCodecConfigurationException.unsupportedVersion(versionValue);
+            }
+            if (version != PayloadCodecAttributes.VERSION_VALUE) {
+                throw UnsupportedCodecConfigurationException.unsupportedVersion(versionValue);
+            }
+        }
+
+        String compressionValue = values.get("c");
+        if (compressionValue != null) {
+            compressionAlgorithm = CompressionAlgorithm.fromId(compressionValue);
+        }
+        String encodingValue = values.get("e");
+        if (encodingValue != null) {
+            encodingAlgorithm = EncodingAlgorithm.fromId(encodingValue);
+        }
+        String checksumValue = values.get("h");
+        if (checksumValue != null) {
+            checksumAlgorithm = ChecksumAlgorithm.fromId(checksumValue);
+        }
+
+        return new PayloadCodecConfiguration(version, compressionAlgorithm, encodingAlgorithm, checksumAlgorithm);
+    }
+
+    private static String formatConfValue(PayloadCodecConfiguration configuration) {
+        return "v=" + configuration.version()
+                + ";c=" + configuration.compressionAlgorithm().id()
+                + ";e=" + configuration.encodingAlgorithm().id()
+                + ";h=" + configuration.checksumAlgorithm().id();
     }
 }

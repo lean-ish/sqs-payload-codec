@@ -10,14 +10,10 @@ import java.io.UncheckedIOException;
 
 import org.xerial.snappy.Snappy;
 
-import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
-
+/**
+ * Snappy implementation of the compressor strategy.
+ */
 public final class SnappyCompressor implements Compressor {
-
-    @Override
-    public CompressionAlgorithm algorithm() {
-        return CompressionAlgorithm.SNAPPY;
-    }
 
     @Override
     public byte[] compress(byte[] payload) {

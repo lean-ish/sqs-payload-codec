@@ -14,14 +14,10 @@ import java.io.UncheckedIOException;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
-import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
-
+/**
+ * Gzip implementation of the compressor strategy.
+ */
 public final class GzipCompressor implements Compressor {
-
-    @Override
-    public CompressionAlgorithm algorithm() {
-        return CompressionAlgorithm.GZIP;
-    }
 
     @Override
     public byte[] compress(byte[] payload) {

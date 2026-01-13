@@ -19,13 +19,32 @@ dependencies {
 ```
 
 Java:
+
+Send with defaults (no compression/encoding, MD5 checksum); decode/validate based on message attributes:
+```java
+SqsAsyncClient client = SqsAsyncClient.builder()
+        .overrideConfiguration(config -> config.addExecutionInterceptor(SqsPayloadCodecInterceptor.defaultInterceptor()))
+        .checksumValidationEnabled(false) // handled by SqsPayloadCodecInterceptor
+        .build();
+```
+
+Send with explicit Zstd compression + default Base64 encoding (when compression is present) + default MD5 checksum; decode/validate based on message attributes:
+```java
+SqsAsyncClient client = SqsAsyncClient.builder()
+        .overrideConfiguration(config -> config.addExecutionInterceptor(SqsPayloadCodecInterceptor.defaultInterceptor()
+                .withCompressionAlgorithm(CompressionAlgorithm.ZSTD)))
+        .checksumValidationEnabled(false) // handled by SqsPayloadCodecInterceptor
+        .build();
+```
+
+Send with explicit compression, encoding, and checksum; decode/validate based on message attributes:
 ```java
 SqsClient client = SqsClient.builder()
-        .overrideConfiguration(config -> config.addExecutionInterceptor(
-                new SqsPayloadCodecInterceptor()
-                        .withCompressionAlgorithm(CompressionAlgorithm.ZSTD)
-                        .withEncodingAlgorithm(EncodingAlgorithm.BASE64_STD)
-                        .withChecksumAlgorithm(ChecksumAlgorithm.SHA256)))
+        .overrideConfiguration(config -> config.addExecutionInterceptor(SqsPayloadCodecInterceptor.defaultInterceptor()
+                .withCompressionAlgorithm(CompressionAlgorithm.GZIP)
+                .withEncodingAlgorithm(EncodingAlgorithm.BASE64_STD)
+                .withChecksumAlgorithm(ChecksumAlgorithm.SHA256)))
+        .checksumValidationEnabled(false) // handled by SqsPayloadCodecInterceptor
         .build();
 ```
 
@@ -37,13 +56,59 @@ Defaults:
 
 ## Attributes
 
-Metadata is stored in SQS message attributes:
-- `x-codec-compression-alg`
-- `x-codec-encoding-alg`
-- `x-codec-checksum-alg`
-- `x-codec-checksum`
-- `x-codec-version` (Number, current value `1`)
+Codec configuration is stored in a single attribute:
+- `x-codec-conf` (String), for example: `v=1;c=zstd;e=base64;h=md5`
+
+Keys:
+- `v`: codec version
+- `c`: compression (`zstd`, `gzip`, `snappy`, `none`)
+- `e`: encoding (`base64`, `base64-std`, `none`)
+- `h`: checksum (`md5`, `sha256`, `none`)
+
+Notes:
+- Order does not matter; keys and values are case-insensitive.
+- Missing keys default to `none` (including `h`), and `v` defaults to `1`.
+- The interceptor defaults to `h=md5` when encoding.
+- Unknown keys are ignored for forward compatibility.
+- If compression is not `none` and encoding is `none`, the effective encoding is `base64` (and is written in `x-codec-conf`).
+
+Other attributes:
+- `x-codec-checksum` (String)
 - `x-codec-raw-length` (Number)
+
+## Error handling
+
+All codec failures extend `PayloadCodecException`. You can catch the base type
+to handle any codec error, or specific exceptions when you want targeted
+responses.
+
+Catch specific decode failures surfaced by the interceptor:
+```java
+try {
+    ReceiveMessageResponse response = client.receiveMessage(request);
+    // use decoded payloads
+} catch (InvalidPayloadException e) {
+    // bad payload data, consider DLQ or logging
+} catch (PayloadCodecException e) {
+    // fallback for any other codec issue
+}
+```
+
+Handle attribute/config errors on receive:
+```java
+try {
+    ReceiveMessageResponse response = client.receiveMessage(request);
+    // interceptor validates checksum/attributes during receive
+} catch (ChecksumValidationException e) {
+    // missing algorithm/attribute or checksum mismatch; inspect e.reason()
+} catch (UnsupportedCodecConfigurationException e) {
+    // malformed/duplicate/unsupported codec configuration
+} catch (UnsupportedAlgorithmException e) {
+    // unsupported compression/encoding/checksum values
+} catch (PayloadCodecException e) {
+    // catch-all for other codec errors
+}
+```
 
 ## Development
 

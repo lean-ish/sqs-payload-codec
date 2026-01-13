@@ -5,10 +5,10 @@
  */
 package io.github.leanish.sqs.codec.algorithms.encoding;
 
-import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
-
+/**
+ * Strategy interface for encoding and decoding payload bytes.
+ */
 public interface Encoder {
-    EncodingAlgorithm algorithm();
     byte[] encode(byte[] payload);
     byte[] decode(byte[] encoded);
 }

@@ -9,7 +9,11 @@ import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
 
+/**
+ * Immutable configuration for codec version, compression, encoding and checksum settings.
+ */
 public record PayloadCodecConfiguration(
+        int version,
         CompressionAlgorithm compressionAlgorithm,
         EncodingAlgorithm encodingAlgorithm,
         ChecksumAlgorithm checksumAlgorithm) {

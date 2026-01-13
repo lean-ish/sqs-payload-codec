@@ -13,8 +13,10 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
+import io.github.leanish.sqs.codec.algorithms.UnsupportedAlgorithmException;
 import io.github.leanish.sqs.codec.algorithms.checksum.Md5Digestor;
 import io.github.leanish.sqs.codec.algorithms.checksum.Sha256Digestor;
+import io.github.leanish.sqs.codec.algorithms.checksum.UnavailableAlgorithmException;
 import io.github.leanish.sqs.codec.algorithms.checksum.UndigestedDigestor;
 
 class ChecksumTest {
@@ -34,30 +36,29 @@ class ChecksumTest {
     void undigestedDigestorThrows() {
         UndigestedDigestor digestor = new UndigestedDigestor();
 
-        assertThat(digestor.algorithm()).isEqualTo(ChecksumAlgorithm.NONE);
         assertThatThrownBy(() -> digestor.checksum("payload".getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOf(UnavailableAlgorithmException.class)
                 .hasMessage("Digestor algorithm is none");
     }
 
     @Test
-    void checksumAlgorithmFromAttributeValueIsCaseInsensitive() {
-        assertThat(ChecksumAlgorithm.fromAttributeValue("MD5")).isEqualTo(ChecksumAlgorithm.MD5);
-        assertThat(ChecksumAlgorithm.fromAttributeValue("sha256")).isEqualTo(ChecksumAlgorithm.SHA256);
-        assertThat(ChecksumAlgorithm.fromAttributeValue("None")).isEqualTo(ChecksumAlgorithm.NONE);
+    void checksumAlgorithmFromIdIsCaseInsensitive() {
+        assertThat(ChecksumAlgorithm.fromId("MD5")).isEqualTo(ChecksumAlgorithm.MD5);
+        assertThat(ChecksumAlgorithm.fromId("sha256")).isEqualTo(ChecksumAlgorithm.SHA256);
+        assertThat(ChecksumAlgorithm.fromId("None")).isEqualTo(ChecksumAlgorithm.NONE);
     }
 
     @Test
-    void checksumAlgorithmFromAttributeValueRejectsUnknown() {
-        assertThatThrownBy(() -> ChecksumAlgorithm.fromAttributeValue("sha1"))
-                .isInstanceOf(PayloadCodecException.class)
+    void checksumAlgorithmFromIdRejectsUnknown() {
+        assertThatThrownBy(() -> ChecksumAlgorithm.fromId("sha1"))
+                .isInstanceOf(UnsupportedAlgorithmException.class)
                 .hasMessage("Unsupported checksum algorithm: sha1");
     }
 
     @Test
-    void checksumAlgorithmFromAttributeValueRejectsBlank() {
-        assertThatThrownBy(() -> ChecksumAlgorithm.fromAttributeValue("  "))
-                .isInstanceOf(PayloadCodecException.class)
+    void checksumAlgorithmFromIdRejectsBlank() {
+        assertThatThrownBy(() -> ChecksumAlgorithm.fromId("  "))
+                .isInstanceOf(UnsupportedAlgorithmException.class)
                 .hasMessage("Unsupported checksum algorithm:   ");
     }
 }

@@ -5,9 +5,9 @@
  */
 package io.github.leanish.sqs.codec.algorithms.checksum;
 
-import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
-
+/**
+ * Strategy interface for computing payload checksums.
+ */
 public interface Digestor {
-    ChecksumAlgorithm algorithm();
     String checksum(byte[] payload);
 }

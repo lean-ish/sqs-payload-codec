@@ -8,6 +8,8 @@ package io.github.leanish.sqs.codec;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.stream.Stream;
 import java.util.zip.ZipException;
@@ -17,69 +19,61 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
+import com.github.luben.zstd.ZstdIOException;
+
 import io.github.leanish.sqs.codec.algorithms.compression.Compressor;
 import io.github.leanish.sqs.codec.algorithms.compression.GzipCompressor;
+import io.github.leanish.sqs.codec.algorithms.compression.NoOpCompressor;
 import io.github.leanish.sqs.codec.algorithms.compression.SnappyCompressor;
-import io.github.leanish.sqs.codec.algorithms.compression.UncompressedCompressor;
 import io.github.leanish.sqs.codec.algorithms.compression.ZstdCompressor;
 
 class CompressionTest {
 
     @ParameterizedTest
     @MethodSource("compressorCases")
-    void compressionRoundTripPreservesPayload(Compressor compressor, CompressionAlgorithm expectedAlgorithm) {
+    void compressionRoundTripPreservesPayload(Compressor compressor) {
         byte[] payload = "payload-42".getBytes(StandardCharsets.UTF_8);
 
         byte[] compressed = compressor.compress(payload);
         byte[] decoded = compressor.decompress(compressed);
 
-        assertThat(compressor.algorithm()).isEqualTo(expectedAlgorithm);
         assertThat(decoded).isEqualTo(payload);
     }
 
     @Test
     void uncompressedCompressorReturnsSameInstance() {
-        UncompressedCompressor compressor = new UncompressedCompressor();
+        NoOpCompressor compressor = new NoOpCompressor();
         byte[] payload = "payload-42".getBytes(StandardCharsets.UTF_8);
 
-        assertThat(compressor.compress(payload)).isSameAs(payload);
-        assertThat(compressor.decompress(payload)).isSameAs(payload);
+        assertThat(compressor.compress(payload))
+                .isSameAs(payload);
+        assertThat(compressor.decompress(payload))
+                .isSameAs(payload);
     }
 
-    @Test
-    void gzipDecompressRejectsInvalidPayload() {
-        GzipCompressor compressor = new GzipCompressor();
-        byte[] payload = "not-gzip".getBytes(StandardCharsets.UTF_8);
-
-        assertThatThrownBy(() -> compressor.decompress(payload))
-                .isInstanceOf(java.io.UncheckedIOException.class)
-                .hasCauseInstanceOf(ZipException.class);
+    @ParameterizedTest
+    @MethodSource("invalidDecompressionCases")
+    void decompressRejectsInvalidPayload(
+            Compressor compressor,
+            String payload,
+            Class<? extends IOException> expectedCause) {
+        assertThatThrownBy(() -> compressor.decompress(payload.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(UncheckedIOException.class)
+                .hasCauseInstanceOf(expectedCause);
     }
 
-    @Test
-    void zstdDecompressRejectsInvalidPayload() {
-        ZstdCompressor compressor = new ZstdCompressor();
-        byte[] payload = "not-zstd".getBytes(StandardCharsets.UTF_8);
-
-        assertThatThrownBy(() -> compressor.decompress(payload))
-                .isInstanceOf(java.io.UncheckedIOException.class);
-    }
-
-    @Test
-    void snappyDecompressRejectsInvalidPayload() {
-        SnappyCompressor compressor = new SnappyCompressor();
-        byte[] payload = "not-snappy".getBytes(StandardCharsets.UTF_8);
-
-        assertThatThrownBy(() -> compressor.decompress(payload))
-                .isInstanceOf(java.io.UncheckedIOException.class);
-    }
-
-    private static Stream<Arguments> compressorCases() {
+    private static Stream<Compressor> compressorCases() {
         return Stream.of(
-                Arguments.of(new UncompressedCompressor(), CompressionAlgorithm.NONE),
-                Arguments.of(new GzipCompressor(), CompressionAlgorithm.GZIP),
-                Arguments.of(new SnappyCompressor(), CompressionAlgorithm.SNAPPY),
-                Arguments.of(new ZstdCompressor(), CompressionAlgorithm.ZSTD));
+                new ZstdCompressor(),
+                new SnappyCompressor(),
+                new GzipCompressor(),
+                new NoOpCompressor());
+    }
+
+    private static Stream<Arguments> invalidDecompressionCases() {
+        return Stream.of(
+                Arguments.of(new GzipCompressor(), "not-gzip", ZipException.class),
+                Arguments.of(new ZstdCompressor(), "not-zstd", ZstdIOException.class),
+                Arguments.of(new SnappyCompressor(), "not-snappy", IOException.class));
     }
 }

@@ -5,14 +5,10 @@
  */
 package io.github.leanish.sqs.codec.algorithms.encoding;
 
-import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
-
-public final class UnencodedEncoder implements Encoder {
-
-    @Override
-    public EncodingAlgorithm algorithm() {
-        return EncodingAlgorithm.NONE;
-    }
+/**
+ * No-op encoder that passes payload bytes through unchanged.
+ */
+public final class NoOpEncoder implements Encoder {
 
     @Override
     public byte[] encode(byte[] payload) {

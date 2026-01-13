@@ -15,14 +15,10 @@ import java.io.UncheckedIOException;
 import com.github.luben.zstd.ZstdInputStreamNoFinalizer;
 import com.github.luben.zstd.ZstdOutputStreamNoFinalizer;
 
-import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
-
+/**
+ * Zstandard implementation of the compressor strategy.
+ */
 public final class ZstdCompressor implements Compressor {
-
-    @Override
-    public CompressionAlgorithm algorithm() {
-        return CompressionAlgorithm.ZSTD;
-    }
 
     @Override
     public byte[] compress(byte[] payload) {

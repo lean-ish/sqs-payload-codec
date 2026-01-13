@@ -5,11 +5,16 @@
  */
 package io.github.leanish.sqs.codec.algorithms;
 
+import org.apache.commons.lang3.StringUtils;
+
 import io.github.leanish.sqs.codec.algorithms.encoding.Base64Encoder;
 import io.github.leanish.sqs.codec.algorithms.encoding.Encoder;
+import io.github.leanish.sqs.codec.algorithms.encoding.NoOpEncoder;
 import io.github.leanish.sqs.codec.algorithms.encoding.StandardBase64Encoder;
-import io.github.leanish.sqs.codec.algorithms.encoding.UnencodedEncoder;
 
+/**
+ * Supported encoding algorithms and their encoder implementations.
+ */
 public enum EncodingAlgorithm {
     /** URL-safe Base64 for attribute values that might travel through URL contexts. */
     BASE64("base64"),
@@ -20,7 +25,7 @@ public enum EncodingAlgorithm {
 
     private static final Encoder BASE64_ENCODER = new Base64Encoder();
     private static final Encoder BASE64_STD_ENCODER = new StandardBase64Encoder();
-    private static final Encoder UNENCODED = new UnencodedEncoder();
+    private static final Encoder NO_OP = new NoOpEncoder();
 
     private final String id;
 
@@ -32,11 +37,23 @@ public enum EncodingAlgorithm {
         return id;
     }
 
+    public static EncodingAlgorithm fromId(String value) {
+        if (StringUtils.isBlank(value)) {
+            throw UnsupportedAlgorithmException.encoding(value);
+        }
+        for (EncodingAlgorithm encoding : values()) {
+            if (encoding.id.equalsIgnoreCase(value)) {
+                return encoding;
+            }
+        }
+        throw UnsupportedAlgorithmException.encoding(value);
+    }
+
     public Encoder encoder() {
         return switch (this) {
             case BASE64 -> BASE64_ENCODER;
             case BASE64_STD -> BASE64_STD_ENCODER;
-            case NONE -> UNENCODED;
+            case NONE -> NO_OP;
         };
     }
 

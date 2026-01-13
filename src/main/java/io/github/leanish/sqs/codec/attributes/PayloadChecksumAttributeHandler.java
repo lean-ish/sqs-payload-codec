@@ -10,10 +10,12 @@ import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 import org.jspecify.annotations.Nullable;
 
-import io.github.leanish.sqs.codec.PayloadCodecException;
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 
+/**
+ * Creates and validates checksum-related SQS message attributes.
+ */
 public final class PayloadChecksumAttributeHandler {
 
     private final String checksumValue;
@@ -30,6 +32,10 @@ public final class PayloadChecksumAttributeHandler {
         return new PayloadChecksumAttributeHandler(checksumValue);
     }
 
+    public static boolean hasAttributes(Map<String, MessageAttributeValue> attributes) {
+        return attributes.containsKey(PayloadCodecAttributes.CHECKSUM);
+    }
+
     public static boolean needsValidation(
             @Nullable String checksumValue,
             ChecksumAlgorithm checksumAlgorithm) {
@@ -42,19 +48,18 @@ public final class PayloadChecksumAttributeHandler {
             byte[] payloadBytes) {
         if (checksumAlgorithm == ChecksumAlgorithm.NONE) {
             if (StringUtils.isNotBlank(checksumValue)) {
-                throw new PayloadCodecException(
-                    "Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM_ALG);
+                throw ChecksumValidationException.missingAlgorithm();
             }
             return;
         }
         if (StringUtils.isBlank(checksumValue)) {
-            throw new PayloadCodecException("Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM);
+            throw ChecksumValidationException.missingAttribute(PayloadCodecAttributes.CHECKSUM);
         }
 
         String actualChecksum = checksumAlgorithm.digestor()
                 .checksum(payloadBytes);
         if (!actualChecksum.equals(checksumValue)) {
-            throw new PayloadCodecException("Payload checksum mismatch");
+            throw ChecksumValidationException.mismatch();
         }
     }
 

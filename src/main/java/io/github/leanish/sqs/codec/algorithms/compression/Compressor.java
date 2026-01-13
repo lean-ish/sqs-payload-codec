@@ -5,10 +5,10 @@
  */
 package io.github.leanish.sqs.codec.algorithms.compression;
 
-import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
-
+/**
+ * Strategy interface for compressing and decompressing payload bytes.
+ */
 public interface Compressor {
-    CompressionAlgorithm algorithm();
     byte[] compress(byte[] payload);
     byte[] decompress(byte[] payload);
 }

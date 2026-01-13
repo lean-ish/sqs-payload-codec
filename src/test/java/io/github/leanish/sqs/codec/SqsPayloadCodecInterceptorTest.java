@@ -28,11 +28,15 @@ import org.reactivestreams.Publisher;
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
+import io.github.leanish.sqs.codec.algorithms.UnsupportedAlgorithmException;
+import io.github.leanish.sqs.codec.algorithms.encoding.InvalidPayloadException;
+import io.github.leanish.sqs.codec.attributes.ChecksumValidationException;
 import io.github.leanish.sqs.codec.attributes.MessageAttributeUtils;
 import io.github.leanish.sqs.codec.attributes.PayloadChecksumAttributeHandler;
 import io.github.leanish.sqs.codec.attributes.PayloadCodecAttributes;
 import io.github.leanish.sqs.codec.attributes.PayloadCodecConfigurationAttributeHandler;
 import io.github.leanish.sqs.codec.attributes.PayloadRawLengthAttributeHandler;
+import io.github.leanish.sqs.codec.attributes.UnsupportedCodecConfigurationException;
 import software.amazon.awssdk.core.SdkRequest;
 import software.amazon.awssdk.core.SdkResponse;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
@@ -54,7 +58,7 @@ class SqsPayloadCodecInterceptorTest {
 
     @Test
     void modifyRequestEncodesMessageBodyWithCompressionAndChecksum() {
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.ZSTD);
         SendMessageRequest request = SendMessageRequest.builder()
                 .messageBody(PAYLOAD)
@@ -69,23 +73,12 @@ class SqsPayloadCodecInterceptorTest {
         SendMessageRequest encoded = (SendMessageRequest) modified;
         assertThat(encoded.messageAttributes())
                 .containsKeys(
-                        PayloadCodecAttributes.COMPRESSION_ALG,
-                        PayloadCodecAttributes.ENCODING_ALG,
-                        PayloadCodecAttributes.CHECKSUM_ALG,
+                        PayloadCodecAttributes.CONF,
                         PayloadCodecAttributes.CHECKSUM,
-                        PayloadCodecAttributes.VERSION,
                         PayloadCodecAttributes.RAW_LENGTH,
                         "shopId");
-        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.COMPRESSION_ALG).stringValue())
-                .isEqualTo(CompressionAlgorithm.ZSTD.id());
-        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.ENCODING_ALG).stringValue())
-                .isEqualTo(EncodingAlgorithm.BASE64.id());
-        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.CHECKSUM_ALG).stringValue())
-                .isEqualTo(ChecksumAlgorithm.MD5.id());
-        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.VERSION).dataType())
-                .isEqualTo("Number");
-        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.VERSION).stringValue())
-                .isEqualTo(Integer.toString(PayloadCodecAttributes.VERSION_VALUE));
+        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.CONF).stringValue())
+                .isEqualTo("v=1;c=zstd;e=base64;h=md5");
         assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.RAW_LENGTH).dataType())
                 .isEqualTo("Number");
         assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.RAW_LENGTH).stringValue())
@@ -105,11 +98,9 @@ class SqsPayloadCodecInterceptorTest {
                 .messageBody(PAYLOAD)
                 .messageAttributes(Map.of(attributeKey, MessageAttributeUtils.stringAttribute("value")))
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor();
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor();
 
-        SdkRequest modified = interceptor.modifyRequest(
-                new ModifyRequestContext(request),
-                new ExecutionAttributes());
+        SdkRequest modified = interceptor.modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes());
 
         assertThat(modified).isSameAs(request);
     }
@@ -119,10 +110,10 @@ class SqsPayloadCodecInterceptorTest {
         SendMessageRequest request = SendMessageRequest.builder()
                 .messageBody(PAYLOAD)
                 .messageAttributes(Map.of(
-                        PayloadCodecAttributes.COMPRESSION_ALG,
+                        PayloadCodecAttributes.CONF,
                         MessageAttributeUtils.stringAttribute(" ")))
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor();
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor();
 
         SdkRequest modified = interceptor.modifyRequest(
                 new ModifyRequestContext(request),
@@ -131,13 +122,13 @@ class SqsPayloadCodecInterceptorTest {
         assertThat(modified).isInstanceOf(SendMessageRequest.class);
         assertThat(modified).isNotSameAs(request);
         SendMessageRequest encoded = (SendMessageRequest) modified;
-        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.COMPRESSION_ALG).stringValue())
-                .isEqualTo(CompressionAlgorithm.NONE.id());
+        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.CONF).stringValue())
+                .isEqualTo("v=1;c=none;e=none;h=md5");
     }
 
     @Test
     void modifyRequestUsesExplicitEncodingAlgorithm() {
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.ZSTD)
                 .withEncodingAlgorithm(EncodingAlgorithm.BASE64_STD)
                 .withChecksumAlgorithm(ChecksumAlgorithm.MD5);
@@ -145,50 +136,43 @@ class SqsPayloadCodecInterceptorTest {
                 .messageBody(PAYLOAD)
                 .build();
 
-        SdkRequest modified = interceptor.modifyRequest(
-                new ModifyRequestContext(request),
-                new ExecutionAttributes());
+        SdkRequest modified = interceptor.modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes());
 
         SendMessageRequest encoded = (SendMessageRequest) modified;
-        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.ENCODING_ALG).stringValue())
-                .isEqualTo(EncodingAlgorithm.BASE64_STD.id());
+        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.CONF).stringValue())
+                .isEqualTo("v=1;c=zstd;e=base64-std;h=md5");
     }
 
     @Test
     void modifyRequestPassesThroughUnknownRequests() {
         SdkRequest request = Mockito.mock(SdkRequest.class);
 
-        SdkRequest modified = new SqsPayloadCodecInterceptor().modifyRequest(
-                new ModifyRequestContext(request),
-                new ExecutionAttributes());
+        SdkRequest modified = SqsPayloadCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes());
 
-        assertThat(modified).isSameAs(request);
+        assertThat(modified)
+                .isSameAs(request);
     }
 
     @Test
     void modifyRequestDoesNotIncludeChecksumWhenDisabled() {
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withChecksumAlgorithm(ChecksumAlgorithm.NONE);
         SendMessageRequest request = SendMessageRequest.builder()
                 .messageBody(PAYLOAD)
                 .build();
 
-        SdkRequest modified = interceptor.modifyRequest(
-                new ModifyRequestContext(request),
-                new ExecutionAttributes());
+        SendMessageRequest encoded = (SendMessageRequest) interceptor.modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes());
 
-        SendMessageRequest encoded = (SendMessageRequest) modified;
         assertThat(encoded.messageBody()).isEqualTo(PAYLOAD);
         assertThat(encoded.messageAttributes())
                 .containsKeys(
-                        PayloadCodecAttributes.COMPRESSION_ALG,
-                        PayloadCodecAttributes.ENCODING_ALG,
-                        PayloadCodecAttributes.VERSION,
+                        PayloadCodecAttributes.CONF,
                         PayloadCodecAttributes.RAW_LENGTH);
+        assertThat(encoded.messageAttributes().get(PayloadCodecAttributes.CONF).stringValue())
+                .isEqualTo("v=1;c=none;e=none;h=none");
         assertThat(encoded.messageAttributes())
-                .doesNotContainKeys(
-                        PayloadCodecAttributes.CHECKSUM_ALG,
-                        PayloadCodecAttributes.CHECKSUM);
+                .doesNotContainKeys(PayloadCodecAttributes.CHECKSUM);
     }
 
     @Test
@@ -204,11 +188,11 @@ class SqsPayloadCodecInterceptorTest {
                                 .id("skipped")
                                 .messageBody("skip")
                                 .messageAttributes(Map.of(
-                                        PayloadCodecAttributes.COMPRESSION_ALG,
-                                        MessageAttributeUtils.stringAttribute(CompressionAlgorithm.ZSTD.id())))
+                                        PayloadCodecAttributes.CONF,
+                                        MessageAttributeUtils.stringAttribute("v=1;c=zstd;e=base64;h=md5")))
                                 .build())
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.ZSTD)
                 .withEncodingAlgorithm(EncodingAlgorithm.NONE);
 
@@ -228,17 +212,15 @@ class SqsPayloadCodecInterceptorTest {
 
         assertThat(encodedEntry.messageAttributes())
                 .containsKeys(
-                        PayloadCodecAttributes.COMPRESSION_ALG,
-                        PayloadCodecAttributes.ENCODING_ALG,
-                        PayloadCodecAttributes.CHECKSUM_ALG,
+                        PayloadCodecAttributes.CONF,
                         PayloadCodecAttributes.CHECKSUM,
-                        PayloadCodecAttributes.VERSION,
                         PayloadCodecAttributes.RAW_LENGTH);
         assertThat(encodedEntry.messageBody()).isNotEqualTo(PAYLOAD);
         PayloadCodec codec = new PayloadCodec(CompressionAlgorithm.ZSTD, EncodingAlgorithm.NONE);
         assertThat(new String(codec.decode(encodedEntry.messageBody().getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8))
                 .isEqualTo(PAYLOAD);
-        assertThat(skippedEntry).isSameAs(request.entries().get(1));
+        assertThat(skippedEntry)
+                .isSameAs(request.entries().get(1));
     }
 
     @Test
@@ -256,18 +238,17 @@ class SqsPayloadCodecInterceptorTest {
                         .messageAttributes(attributes)
                         .build())
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.GZIP)
                 .withEncodingAlgorithm(EncodingAlgorithm.BASE64_STD)
                 .withChecksumAlgorithm(ChecksumAlgorithm.MD5);
 
-        SdkResponse modified = interceptor.modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) modified;
-        assertThat(decoded.messages()).hasSize(1);
-        assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
+        assertThat(decoded.messages())
+                .hasSize(1);
+        assertThat(decoded.messages().getFirst().body())
+                .isEqualTo(PAYLOAD);
     }
 
     @ParameterizedTest
@@ -287,17 +268,17 @@ class SqsPayloadCodecInterceptorTest {
                         .messageAttributes(attributes)
                         .build())
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.ZSTD)
                 .withEncodingAlgorithm(EncodingAlgorithm.NONE)
                 .withChecksumAlgorithm(otherChecksumAlgorithm(checksumAlgorithm));
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(decoded.messages()).hasSize(1);
-        assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
+        assertThat(decoded.messages())
+                .hasSize(1);
+        assertThat(decoded.messages().getFirst().body())
+                .isEqualTo(PAYLOAD);
     }
 
     @ParameterizedTest(name = "message={0}/{1}, interceptor={2}/{3}")
@@ -321,17 +302,17 @@ class SqsPayloadCodecInterceptorTest {
                         .messageAttributes(attributes)
                         .build())
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(interceptorCompression)
                 .withEncodingAlgorithm(interceptorEncoding)
                 .withChecksumAlgorithm(ChecksumAlgorithm.SHA256);
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(decoded.messages()).hasSize(1);
-        assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
+        assertThat(decoded.messages())
+                .hasSize(1);
+        assertThat(decoded.messages().getFirst().body())
+                .isEqualTo(PAYLOAD);
     }
 
     @ParameterizedTest(name = "message={0}, interceptor={1}")
@@ -353,17 +334,17 @@ class SqsPayloadCodecInterceptorTest {
                         .messageAttributes(attributes)
                         .build())
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.GZIP)
                 .withEncodingAlgorithm(EncodingAlgorithm.BASE64_STD)
                 .withChecksumAlgorithm(interceptorChecksum);
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(decoded.messages()).hasSize(1);
-        assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
+        assertThat(decoded.messages())
+                .hasSize(1);
+        assertThat(decoded.messages().getFirst().body())
+                .isEqualTo(PAYLOAD);
     }
 
     @ParameterizedTest
@@ -371,7 +352,8 @@ class SqsPayloadCodecInterceptorTest {
     void modifyResponseValidatesChecksumWhenCodecAttributesMissing(ChecksumAlgorithm checksumAlgorithm) {
         byte[] payloadBytes = PAYLOAD.getBytes(StandardCharsets.UTF_8);
         Map<String, MessageAttributeValue> attributes = new HashMap<>();
-        attributes.put(PayloadCodecAttributes.CHECKSUM_ALG, MessageAttributeUtils.stringAttribute(checksumAlgorithm.id()));
+        attributes.put(PayloadCodecAttributes.CONF,
+                MessageAttributeUtils.stringAttribute("v=1;h=" + checksumAlgorithm.id()));
         attributes.put(PayloadCodecAttributes.CHECKSUM, MessageAttributeUtils.stringAttribute(
                 checksumAlgorithm.digestor().checksum(payloadBytes)));
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
@@ -380,14 +362,13 @@ class SqsPayloadCodecInterceptorTest {
                         .messageAttributes(attributes)
                         .build())
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withChecksumAlgorithm(otherChecksumAlgorithm(checksumAlgorithm));
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
+        assertThat(decoded.messages().getFirst().body())
+                .isEqualTo(PAYLOAD);
     }
 
     @Test
@@ -409,60 +390,61 @@ class SqsPayloadCodecInterceptorTest {
                 .messages(encodedMessage, plainMessage)
                 .build();
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) new SqsPayloadCodecInterceptor().modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsPayloadCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(decoded.messages()).hasSize(2);
-        assertThat(decoded.messages().get(0).body()).isEqualTo(PAYLOAD);
-        assertThat(decoded.messages().get(1)).isSameAs(plainMessage);
+        assertThat(decoded.messages())
+                .hasSize(2);
+        assertThat(decoded.messages().get(0).body())
+                .isEqualTo(PAYLOAD);
+        assertThat(decoded.messages().get(1))
+                .isSameAs(plainMessage);
     }
 
     @Test
-    void modifyResponsePassesThroughWhenNoCodecAttributes() {
+    void modifyResponse_noCodecAttributes() {
         Message message = Message.builder()
                 .body(PAYLOAD)
                 .build();
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
                 .messages(message)
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor();
 
-        SdkResponse modified = interceptor.modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsPayloadCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) modified;
-        assertThat(decoded.messages().getFirst()).isSameAs(message);
-        assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
+        assertThat(decoded.messages().getFirst())
+                .isSameAs(message);
+        assertThat(decoded.messages().getFirst().body())
+                .isEqualTo(PAYLOAD);
     }
 
     @Test
-    void modifyResponseReturnsSameWhenNoMessages() {
+    void modifyResponse_noMessages() {
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
                 .messages(List.of())
                 .build();
 
-        SdkResponse modified = new SqsPayloadCodecInterceptor().modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        SdkResponse modified = SqsPayloadCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(modified).isSameAs(response);
+        assertThat(modified)
+                .isSameAs(response);
     }
 
     @Test
-    void modifyResponsePassesThroughUnknownResponses() {
+    void modifyResponse_emptyResponses() {
         SdkResponse response = Mockito.mock(SdkResponse.class);
 
-        SdkResponse modified = new SqsPayloadCodecInterceptor().modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        SdkResponse modified = SqsPayloadCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(modified).isSameAs(response);
+        assertThat(modified)
+                .isSameAs(response);
     }
 
     @Test
-    void modifyResponseSkipsChecksumWhenDisabled() {
+    void modifyResponse_disabledChecksum() {
         PayloadCodec codec = new PayloadCodec(CompressionAlgorithm.ZSTD, EncodingAlgorithm.BASE64);
         String encodedBody = new String(codec.encode(PAYLOAD.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
         Map<String, MessageAttributeValue> attributes = codecAttributes(
@@ -476,16 +458,15 @@ class SqsPayloadCodecInterceptorTest {
                         .messageAttributes(attributes)
                         .build())
                 .build();
-        SqsPayloadCodecInterceptor interceptor = new SqsPayloadCodecInterceptor()
+        SqsPayloadCodecInterceptor interceptor = SqsPayloadCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.ZSTD)
                 .withEncodingAlgorithm(EncodingAlgorithm.BASE64)
                 .withChecksumAlgorithm(ChecksumAlgorithm.NONE);
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes());
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) interceptor.modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
-        assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
+        assertThat(decoded.messages().getFirst().body())
+                .isEqualTo(PAYLOAD);
     }
 
     @Test
@@ -497,7 +478,8 @@ class SqsPayloadCodecInterceptorTest {
                 CompressionAlgorithm.NONE,
                 EncodingAlgorithm.NONE,
                 ChecksumAlgorithm.MD5);
-        attributes.put(PayloadCodecAttributes.CHECKSUM_ALG, MessageAttributeUtils.stringAttribute(ChecksumAlgorithm.NONE.id()));
+        attributes.put(PayloadCodecAttributes.CONF,
+                MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=none"));
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
                 .messages(Message.builder()
                         .body(encodedBody)
@@ -505,11 +487,11 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
+        assertThatThrownBy(() -> SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
-                .hasMessage("Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM_ALG);
+                .isInstanceOf(ChecksumValidationException.class)
+                .hasMessage("Missing required checksum algorithm");
     }
 
     @Test
@@ -517,12 +499,8 @@ class SqsPayloadCodecInterceptorTest {
         PayloadCodec codec = new PayloadCodec(CompressionAlgorithm.GZIP, EncodingAlgorithm.BASE64_STD);
         String encodedBody = new String(codec.encode(PAYLOAD.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
         Map<String, MessageAttributeValue> attributes = new HashMap<>();
-        attributes.put(PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute("GZIP"));
-        attributes.put(PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute("BASE64-STD"));
-        attributes.put(PayloadCodecAttributes.VERSION, MessageAttributeUtils.numberAttribute(PayloadCodecAttributes.VERSION_VALUE));
-        attributes.put(PayloadCodecAttributes.RAW_LENGTH,
-                MessageAttributeUtils.numberAttribute(PAYLOAD.getBytes(StandardCharsets.UTF_8).length));
-        attributes.put(PayloadCodecAttributes.CHECKSUM_ALG, MessageAttributeUtils.stringAttribute(ChecksumAlgorithm.MD5.id()));
+        attributes.put(PayloadCodecAttributes.CONF,
+                MessageAttributeUtils.stringAttribute("V=1;C=GZIP;E=BASE64-STD;H=MD5"));
         attributes.put(PayloadCodecAttributes.CHECKSUM, MessageAttributeUtils.stringAttribute(
                 ChecksumAlgorithm.MD5.digestor().checksum(PAYLOAD.getBytes(StandardCharsets.UTF_8))));
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
@@ -532,7 +510,7 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) new SqsPayloadCodecInterceptor().modifyResponse(
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes());
 
@@ -554,7 +532,7 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) new SqsPayloadCodecInterceptor()
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsPayloadCodecInterceptor.defaultInterceptor()
                 .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
 
         assertThat(decoded.messages().getFirst().body()).isEqualTo(PAYLOAD);
@@ -564,6 +542,7 @@ class SqsPayloadCodecInterceptorTest {
     @MethodSource("unsupportedAttributeCases")
     void modifyResponseThrowsWhenUnsupportedAttributes(
             Map<String, MessageAttributeValue> attributes,
+            Class<? extends PayloadCodecException> expectedException,
             String expectedMessage) {
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
                 .messages(Message.builder()
@@ -572,33 +551,11 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
+        assertThatThrownBy(() -> SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOf(expectedException)
                 .hasMessage(expectedMessage);
-    }
-
-    @Test
-    void modifyResponseThrowsWhenChecksumAlgorithmMissing() {
-        Map<String, MessageAttributeValue> attributes = codecAttributes(
-                PAYLOAD.getBytes(StandardCharsets.UTF_8),
-                CompressionAlgorithm.NONE,
-                EncodingAlgorithm.NONE,
-                ChecksumAlgorithm.MD5);
-        attributes.remove(PayloadCodecAttributes.CHECKSUM_ALG);
-        ReceiveMessageResponse response = ReceiveMessageResponse.builder()
-                .messages(Message.builder()
-                        .body(PAYLOAD)
-                        .messageAttributes(attributes)
-                        .build())
-                .build();
-
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
-                .hasMessage("Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM_ALG);
     }
 
     @Test
@@ -614,33 +571,11 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
+        assertThatThrownBy(() -> SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
-                .hasMessage("Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM_ALG);
-    }
-
-    @Test
-    void modifyResponseThrowsWhenChecksumAlgorithmBlank() {
-        Map<String, MessageAttributeValue> attributes = codecAttributes(
-                PAYLOAD.getBytes(StandardCharsets.UTF_8),
-                CompressionAlgorithm.NONE,
-                EncodingAlgorithm.NONE,
-                ChecksumAlgorithm.MD5);
-        attributes.put(PayloadCodecAttributes.CHECKSUM_ALG, MessageAttributeUtils.stringAttribute(" "));
-        ReceiveMessageResponse response = ReceiveMessageResponse.builder()
-                .messages(Message.builder()
-                        .body(PAYLOAD)
-                        .messageAttributes(attributes)
-                        .build())
-                .build();
-
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
-                new ModifyResponseContext(response),
-                new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
-                .hasMessage("Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM_ALG);
+                .isInstanceOf(ChecksumValidationException.class)
+                .hasMessage("Missing required checksum algorithm");
     }
 
     @Test
@@ -660,10 +595,12 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
+        assertThatThrownBy(() -> SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOfSatisfying(ChecksumValidationException.class, exception -> {
+                    assertThat(exception.detail()).isEqualTo(PayloadCodecAttributes.CHECKSUM);
+                })
                 .hasMessage("Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM);
     }
 
@@ -682,10 +619,12 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
+        assertThatThrownBy(() -> SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOfSatisfying(ChecksumValidationException.class, exception -> {
+                    assertThat(exception.detail()).isEqualTo(PayloadCodecAttributes.CHECKSUM);
+                })
                 .hasMessage("Missing required SQS attribute: " + PayloadCodecAttributes.CHECKSUM);
     }
 
@@ -706,10 +645,10 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
+        assertThatThrownBy(() -> SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOf(ChecksumValidationException.class)
                 .hasMessage("Payload checksum mismatch");
     }
 
@@ -727,10 +666,10 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        assertThatThrownBy(() -> new SqsPayloadCodecInterceptor().modifyResponse(
+        assertThatThrownBy(() -> SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(PayloadCodecException.class)
+                .isInstanceOf(InvalidPayloadException.class)
                 .hasMessage("Invalid base64 payload");
     }
 
@@ -750,7 +689,7 @@ class SqsPayloadCodecInterceptorTest {
                         .build())
                 .build();
 
-        ReceiveMessageResponse decoded = (ReceiveMessageResponse) new SqsPayloadCodecInterceptor().modifyResponse(
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsPayloadCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes());
 
@@ -758,55 +697,43 @@ class SqsPayloadCodecInterceptorTest {
     }
 
     @Test
-    void compressionFromAttributeValueRejectsBlank() {
+    void compressionFromIdRejectsBlank() {
         String value = " ";
-        assertThatThrownBy(() -> PayloadCodecConfigurationAttributeHandler.compressionFromAttributeValue(value))
-                .isInstanceOf(PayloadCodecException.class)
+        assertThatThrownBy(() -> CompressionAlgorithm.fromId(value))
+                .isInstanceOf(UnsupportedAlgorithmException.class)
                 .hasMessage("Unsupported payload compression: " + value);
     }
 
     @Test
-    void encodingFromAttributeValueRejectsBlank() {
+    void encodingFromIdRejectsBlank() {
         String value = " ";
-        assertThatThrownBy(() -> PayloadCodecConfigurationAttributeHandler.encodingFromAttributeValue(value))
-                .isInstanceOf(PayloadCodecException.class)
+        assertThatThrownBy(() -> EncodingAlgorithm.fromId(value))
+                .isInstanceOf(UnsupportedAlgorithmException.class)
                 .hasMessage("Unsupported payload encoding: " + value);
     }
 
     private static Stream<Arguments> skipEncodingCases() {
         return Stream.of(
-                Arguments.of(PayloadCodecAttributes.COMPRESSION_ALG),
-                Arguments.of(PayloadCodecAttributes.ENCODING_ALG));
+                Arguments.of(PayloadCodecAttributes.CONF));
     }
 
     private static Stream<Arguments> defaultedAttributeCases() {
         Map<String, MessageAttributeValue> emptyAttributes = Map.of();
         Map<String, MessageAttributeValue> missingCompression = Map.of(
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(EncodingAlgorithm.BASE64.id()));
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;e=base64"));
         Map<String, MessageAttributeValue> missingEncoding = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute(CompressionAlgorithm.ZSTD.id()));
-        Map<String, MessageAttributeValue> blankCompression = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute("  "),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(EncodingAlgorithm.BASE64.id()));
-        Map<String, MessageAttributeValue> blankEncoding = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute(CompressionAlgorithm.ZSTD.id()),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(""));
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;c=zstd"));
         Map<String, MessageAttributeValue> missingVersion = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute(CompressionAlgorithm.NONE.id()),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(EncodingAlgorithm.NONE.id()));
-        Map<String, MessageAttributeValue> blankVersion = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute(CompressionAlgorithm.NONE.id()),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(EncodingAlgorithm.NONE.id()),
-                PayloadCodecAttributes.VERSION, MessageAttributeUtils.stringAttribute(" "));
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("c=none;e=none;h=none"));
+        Map<String, MessageAttributeValue> missingChecksum = Map.of(
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;c=gzip;e=base64"));
 
         return Stream.of(
                 Arguments.of(emptyAttributes, CompressionAlgorithm.NONE, EncodingAlgorithm.NONE),
                 Arguments.of(missingCompression, CompressionAlgorithm.NONE, EncodingAlgorithm.BASE64),
                 Arguments.of(missingEncoding, CompressionAlgorithm.ZSTD, EncodingAlgorithm.NONE),
-                Arguments.of(blankCompression, CompressionAlgorithm.NONE, EncodingAlgorithm.BASE64),
-                Arguments.of(blankEncoding, CompressionAlgorithm.ZSTD, EncodingAlgorithm.NONE),
                 Arguments.of(missingVersion, CompressionAlgorithm.NONE, EncodingAlgorithm.NONE),
-                Arguments.of(blankVersion, CompressionAlgorithm.NONE, EncodingAlgorithm.NONE));
+                Arguments.of(missingChecksum, CompressionAlgorithm.GZIP, EncodingAlgorithm.BASE64));
     }
 
     private static Stream<Arguments> codecConfigurationPairs() {
@@ -837,35 +764,43 @@ class SqsPayloadCodecInterceptorTest {
 
     private static Stream<Arguments> unsupportedAttributeCases() {
         Map<String, MessageAttributeValue> unsupportedCompression = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute("lz4"),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(EncodingAlgorithm.BASE64.id()),
-                PayloadCodecAttributes.VERSION, MessageAttributeUtils.numberAttribute(PayloadCodecAttributes.VERSION_VALUE));
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;c=lz4;e=base64;h=md5"));
         Map<String, MessageAttributeValue> unsupportedEncoding = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute(CompressionAlgorithm.NONE.id()),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute("snappy"),
-                PayloadCodecAttributes.VERSION, MessageAttributeUtils.numberAttribute(PayloadCodecAttributes.VERSION_VALUE));
-        Map<String, MessageAttributeValue> compressionWithoutEncoding = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute(CompressionAlgorithm.GZIP.id()),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(EncodingAlgorithm.NONE.id()),
-                PayloadCodecAttributes.VERSION, MessageAttributeUtils.numberAttribute(PayloadCodecAttributes.VERSION_VALUE));
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;c=none;e=snappy;h=md5"));
+        Map<String, MessageAttributeValue> unsupportedChecksum = Map.of(
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=crc32"));
         Map<String, MessageAttributeValue> unsupportedVersion = Map.of(
-                PayloadCodecAttributes.COMPRESSION_ALG, MessageAttributeUtils.stringAttribute(CompressionAlgorithm.NONE.id()),
-                PayloadCodecAttributes.ENCODING_ALG, MessageAttributeUtils.stringAttribute(EncodingAlgorithm.NONE.id()),
-                PayloadCodecAttributes.VERSION, MessageAttributeUtils.numberAttribute(2));
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=2;c=none;e=none;h=md5"));
+        Map<String, MessageAttributeValue> invalidFormat = Map.of(
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;c"));
+        Map<String, MessageAttributeValue> duplicateKey = Map.of(
+                PayloadCodecAttributes.CONF, MessageAttributeUtils.stringAttribute("v=1;c=none;c=zstd"));
 
         return Stream.of(
                 Arguments.of(
                         unsupportedCompression,
+                        UnsupportedAlgorithmException.class,
                         "Unsupported payload compression: lz4"),
                 Arguments.of(
                         unsupportedEncoding,
+                        UnsupportedAlgorithmException.class,
                         "Unsupported payload encoding: snappy"),
                 Arguments.of(
-                        compressionWithoutEncoding,
-                        "Unsupported payload encoding: none"),
+                        unsupportedChecksum,
+                        UnsupportedAlgorithmException.class,
+                        "Unsupported checksum algorithm: crc32"),
                 Arguments.of(
                         unsupportedVersion,
-                        "Unsupported codec version: 2"));
+                        UnsupportedCodecConfigurationException.class,
+                        "Unsupported codec version: 2"),
+                Arguments.of(
+                        invalidFormat,
+                        UnsupportedCodecConfigurationException.class,
+                        "Unsupported codec configuration: v=1;c"),
+                Arguments.of(
+                        duplicateKey,
+                        UnsupportedCodecConfigurationException.class,
+                        "Duplicate codec configuration key: c"));
     }
 
     private static Map<String, MessageAttributeValue> codecAttributes(
@@ -874,6 +809,7 @@ class SqsPayloadCodecInterceptorTest {
             EncodingAlgorithm encodingAlgorithm,
             ChecksumAlgorithm checksumAlgorithm) {
         PayloadCodecConfiguration configuration = new PayloadCodecConfiguration(
+                PayloadCodecAttributes.VERSION_VALUE,
                 compressionAlgorithm,
                 encodingAlgorithm,
                 checksumAlgorithm);

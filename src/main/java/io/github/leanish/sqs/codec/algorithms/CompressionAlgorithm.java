@@ -5,12 +5,17 @@
  */
 package io.github.leanish.sqs.codec.algorithms;
 
+import org.apache.commons.lang3.StringUtils;
+
 import io.github.leanish.sqs.codec.algorithms.compression.Compressor;
 import io.github.leanish.sqs.codec.algorithms.compression.GzipCompressor;
+import io.github.leanish.sqs.codec.algorithms.compression.NoOpCompressor;
 import io.github.leanish.sqs.codec.algorithms.compression.SnappyCompressor;
-import io.github.leanish.sqs.codec.algorithms.compression.UncompressedCompressor;
 import io.github.leanish.sqs.codec.algorithms.compression.ZstdCompressor;
 
+/**
+ * Supported compression algorithms and their compressor implementations.
+ */
 public enum CompressionAlgorithm {
     /** Zstandard compression for high ratio with good performance. */
     ZSTD("zstd"),
@@ -24,7 +29,7 @@ public enum CompressionAlgorithm {
     private static final Compressor ZSTD_COMPRESSOR = new ZstdCompressor();
     private static final Compressor SNAPPY_COMPRESSOR = new SnappyCompressor();
     private static final Compressor GZIP_COMPRESSOR = new GzipCompressor();
-    private static final Compressor UNCOMPRESSED = new UncompressedCompressor();
+    private static final Compressor NO_OP = new NoOpCompressor();
 
     private final String id;
 
@@ -36,12 +41,24 @@ public enum CompressionAlgorithm {
         return id;
     }
 
+    public static CompressionAlgorithm fromId(String value) {
+        if (StringUtils.isBlank(value)) {
+            throw UnsupportedAlgorithmException.compression(value);
+        }
+        for (CompressionAlgorithm compression : values()) {
+            if (compression.id.equalsIgnoreCase(value)) {
+                return compression;
+            }
+        }
+        throw UnsupportedAlgorithmException.compression(value);
+    }
+
     public Compressor compressor() {
         return switch (this) {
             case ZSTD -> ZSTD_COMPRESSOR;
             case SNAPPY -> SNAPPY_COMPRESSOR;
             case GZIP -> GZIP_COMPRESSOR;
-            case NONE -> UNCOMPRESSED;
+            case NONE -> NO_OP;
         };
     }
 }

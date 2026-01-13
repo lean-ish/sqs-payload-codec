@@ -9,6 +9,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -23,6 +25,8 @@ import io.github.leanish.sqs.codec.SqsPayloadCodecInterceptor;
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
+import io.github.leanish.sqs.codec.algorithms.encoding.InvalidPayloadException;
+import io.github.leanish.sqs.codec.attributes.ChecksumValidationException;
 import io.github.leanish.sqs.codec.attributes.MessageAttributeUtils;
 import io.github.leanish.sqs.codec.attributes.PayloadCodecAttributes;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -34,6 +38,8 @@ import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
+import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequest;
+import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequestEntry;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 @Tag("integration")
@@ -46,7 +52,7 @@ class SqsPayloadCodecInterceptorIntegrationTest {
             .withServices("sqs");
 
     @Test
-    void interceptorRoundTripPreservesBodyAndAttributes() {
+    void happyPath() {
         String payload = "{\"value\":42}";
         byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
 
@@ -64,37 +70,27 @@ class SqsPayloadCodecInterceptorIntegrationTest {
 
             Message message = receiveSingleMessage(client, queueUrl);
 
-            assertThat(message.body()).isEqualTo(payload);
+            assertThat(message.body())
+                    .isEqualTo(payload);
             assertThat(message.messageAttributes())
                     .containsKeys(
-                            PayloadCodecAttributes.COMPRESSION_ALG,
-                            PayloadCodecAttributes.ENCODING_ALG,
-                            PayloadCodecAttributes.VERSION,
+                            PayloadCodecAttributes.CONF,
                             PayloadCodecAttributes.RAW_LENGTH,
-                            PayloadCodecAttributes.CHECKSUM_ALG,
                             PayloadCodecAttributes.CHECKSUM,
                             "shopId");
 
             Map<String, MessageAttributeValue> attributes = message.messageAttributes();
-            assertThat(attributes.get(PayloadCodecAttributes.COMPRESSION_ALG).stringValue())
-                    .isEqualTo(CompressionAlgorithm.ZSTD.id());
-            assertThat(attributes.get(PayloadCodecAttributes.ENCODING_ALG).stringValue())
-                    .isEqualTo(EncodingAlgorithm.BASE64.id());
-            assertThat(attributes.get(PayloadCodecAttributes.VERSION).dataType())
-                    .isEqualTo("Number");
-            assertThat(attributes.get(PayloadCodecAttributes.VERSION).stringValue())
-                    .isEqualTo(Integer.toString(PayloadCodecAttributes.VERSION_VALUE));
+            assertThat(attributes.get(PayloadCodecAttributes.CONF).stringValue())
+                    .isEqualTo("v=1;c=zstd;e=base64;h=md5");
             assertThat(attributes.get(PayloadCodecAttributes.RAW_LENGTH).stringValue())
                     .isEqualTo(Integer.toString(payloadBytes.length));
-            assertThat(attributes.get(PayloadCodecAttributes.CHECKSUM_ALG).stringValue())
-                    .isEqualTo(ChecksumAlgorithm.MD5.id());
             assertThat(attributes.get(PayloadCodecAttributes.CHECKSUM).stringValue())
                     .isEqualTo(ChecksumAlgorithm.MD5.digestor().checksum(payloadBytes));
         }
     }
 
     @Test
-    void interceptorSkipsChecksumWhenDisabled() {
+    void checksumNone() {
         String payload = "payload-no-checksum";
 
         try (SqsClient client = sqsClient(
@@ -110,28 +106,188 @@ class SqsPayloadCodecInterceptorIntegrationTest {
 
             Message message = receiveSingleMessage(client, queueUrl);
 
-            assertThat(message.body()).isEqualTo(payload);
+            assertThat(message.body())
+                    .isEqualTo(payload);
             assertThat(message.messageAttributes())
-                    .doesNotContainKeys(
-                            PayloadCodecAttributes.CHECKSUM_ALG,
-                            PayloadCodecAttributes.CHECKSUM);
+                    .doesNotContainKeys(PayloadCodecAttributes.CHECKSUM);
+            assertThat(message.messageAttributes().get(PayloadCodecAttributes.CONF).stringValue())
+                    .isEqualTo("v=1;c=none;e=none;h=none");
+        }
+    }
+
+    @Test
+    void happyPathBatchMessages() {
+        List<String> payloads = List.of(
+                "{\"value\":1}",
+                "{\"value\":2}",
+                "{\"value\":3}");
+
+        try (SqsClient client = sqsClient(
+                CompressionAlgorithm.GZIP,
+                EncodingAlgorithm.BASE64_STD,
+                ChecksumAlgorithm.SHA256)) {
+            String queueUrl = createQueue(client);
+            List<SendMessageBatchRequestEntry> entries = new ArrayList<>();
+            for (int i = 0; i < payloads.size(); i++) {
+                entries.add(SendMessageBatchRequestEntry.builder()
+                        .id("msg-" + i)
+                        .messageBody(payloads.get(i))
+                        .messageAttributes(Map.of(
+                                "shopId",
+                                MessageAttributeUtils.stringAttribute("shop-" + i)))
+                        .build());
+            }
+
+            client.sendMessageBatch(SendMessageBatchRequest.builder()
+                    .queueUrl(queueUrl)
+                    .entries(entries)
+                    .build());
+
+            List<Message> messages = receiveMessages(client, queueUrl, payloads.size());
+
+            assertThat(messages)
+                    .hasSize(payloads.size());
+            assertThat(messages.stream().map(Message::body).toList())
+                    .containsExactlyInAnyOrderElementsOf(payloads);
+            for (Message message : messages) {
+                Map<String, MessageAttributeValue> attributes = message.messageAttributes();
+                byte[] payloadBytes = message.body().getBytes(StandardCharsets.UTF_8);
+
+                assertThat(attributes)
+                        .containsKeys(
+                                PayloadCodecAttributes.CONF,
+                                PayloadCodecAttributes.RAW_LENGTH,
+                                PayloadCodecAttributes.CHECKSUM,
+                                "shopId");
+                assertThat(attributes.get(PayloadCodecAttributes.CONF).stringValue())
+                        .isEqualTo("v=1;c=gzip;e=base64-std;h=sha256");
+                assertThat(attributes.get(PayloadCodecAttributes.RAW_LENGTH).stringValue())
+                        .isEqualTo(Integer.toString(payloadBytes.length));
+                assertThat(attributes.get(PayloadCodecAttributes.CHECKSUM).stringValue())
+                        .isEqualTo(ChecksumAlgorithm.SHA256.digestor().checksum(payloadBytes));
+            }
+        }
+    }
+
+    @Test
+    void corruptedPayload() {
+        try (SqsClient sender = rawSqsClient();
+                SqsClient receiver = sqsClient(
+                        CompressionAlgorithm.NONE,
+                        EncodingAlgorithm.NONE,
+                        ChecksumAlgorithm.MD5)) {
+            String queueUrl = createQueue(sender);
+
+            sender.sendMessage(SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody("!!")
+                    .messageAttributes(Map.of(
+                            PayloadCodecAttributes.CONF,
+                            MessageAttributeUtils.stringAttribute("v=1;c=none;e=base64;h=none")))
+                    .build());
+
+            assertReceiveThrows(
+                    receiver,
+                    queueUrl,
+                    InvalidPayloadException.class,
+                    "Invalid base64 payload");
+        }
+    }
+
+    @Test
+    void checksumMismatch() {
+        String payload = "payload-checksum";
+
+        try (SqsClient sender = rawSqsClient();
+                SqsClient receiver = sqsClient(
+                        CompressionAlgorithm.NONE,
+                        EncodingAlgorithm.NONE,
+                        ChecksumAlgorithm.MD5)) {
+            String queueUrl = createQueue(sender);
+
+            sender.sendMessage(SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(payload)
+                    .messageAttributes(Map.of(
+                            PayloadCodecAttributes.CONF,
+                            MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=md5"),
+                            PayloadCodecAttributes.CHECKSUM,
+                            MessageAttributeUtils.stringAttribute("bad")))
+                    .build());
+
+            assertReceiveThrows(
+                    receiver,
+                    queueUrl,
+                    ChecksumValidationException.class,
+                    "Payload checksum mismatch");
         }
     }
 
     private static Message receiveSingleMessage(SqsClient client, String queueUrl) {
+        return receiveMessages(client, queueUrl, 1).getFirst();
+    }
+
+    private static List<Message> receiveMessages(SqsClient client, String queueUrl, int expectedCount) {
+        List<Message> messages = new ArrayList<>();
         long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-        while (System.nanoTime() < deadline) {
+        while (System.nanoTime() < deadline && messages.size() < expectedCount) {
             ReceiveMessageResponse response = client.receiveMessage(ReceiveMessageRequest.builder()
                     .queueUrl(queueUrl)
-                    .maxNumberOfMessages(1)
+                    .maxNumberOfMessages(Math.min(10, expectedCount - messages.size()))
                     .messageAttributeNames("All")
                     .waitTimeSeconds(1)
                     .build());
             if (!response.messages().isEmpty()) {
-                return response.messages().getFirst();
+                messages.addAll(response.messages());
             }
         }
-        throw new AssertionError("No messages received from queue " + queueUrl);
+        if (messages.size() < expectedCount) {
+            throw new AssertionError("Expected " + expectedCount + " messages from queue " + queueUrl
+                    + ", received " + messages.size());
+        }
+        return messages;
+    }
+
+    private static void assertReceiveThrows(
+            SqsClient client,
+            String queueUrl,
+            Class<? extends RuntimeException> expectedType,
+            String expectedMessage) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < deadline) {
+            try {
+                ReceiveMessageResponse response = client.receiveMessage(ReceiveMessageRequest.builder()
+                        .queueUrl(queueUrl)
+                        .maxNumberOfMessages(1)
+                        .messageAttributeNames("All")
+                        .waitTimeSeconds(1)
+                        .build());
+                if (response.messages().isEmpty()) {
+                    continue;
+                }
+                throw new AssertionError("Expected receive to fail for queue " + queueUrl);
+            } catch (RuntimeException e) {
+                RuntimeException match = findCause(e, expectedType);
+                if (match != null && expectedMessage.equals(match.getMessage())) {
+                    return;
+                }
+                throw e;
+            }
+        }
+        throw new AssertionError("Expected receive to fail for queue " + queueUrl);
+    }
+
+    private static RuntimeException findCause(
+            RuntimeException exception,
+            Class<? extends RuntimeException> expectedType) {
+        Throwable current = exception;
+        while (current != null) {
+            if (expectedType.isInstance(current)) {
+                return expectedType.cast(current);
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private static SqsClient sqsClient(
@@ -144,10 +300,20 @@ class SqsPayloadCodecInterceptorIntegrationTest {
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(LOCALSTACK.getAccessKey(), LOCALSTACK.getSecretKey())))
                 .overrideConfiguration(config -> config.addExecutionInterceptor(
-                        new SqsPayloadCodecInterceptor()
+                        SqsPayloadCodecInterceptor.defaultInterceptor()
                                 .withCompressionAlgorithm(compressionAlgorithm)
                                 .withEncodingAlgorithm(encodingAlgorithm)
                                 .withChecksumAlgorithm(checksumAlgorithm)))
+                .checksumValidationEnabled(false)
+                .build();
+    }
+
+    private static SqsClient rawSqsClient() {
+        return SqsClient.builder()
+                .endpointOverride(LOCALSTACK.getEndpoint())
+                .region(Region.of(LOCALSTACK.getRegion()))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(LOCALSTACK.getAccessKey(), LOCALSTACK.getSecretKey())))
                 .checksumValidationEnabled(false)
                 .build();
     }
@@ -159,5 +325,4 @@ class SqsPayloadCodecInterceptorIntegrationTest {
                 .build())
                 .queueUrl();
     }
-
 }

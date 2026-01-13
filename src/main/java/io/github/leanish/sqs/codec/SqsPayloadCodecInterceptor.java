@@ -33,17 +33,21 @@ import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequestEntry;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
+/**
+ * AWS SDK v2 execution interceptor that encodes/decodes SQS message bodies and manages codec attributes.
+ */
 @With
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class SqsPayloadCodecInterceptor implements ExecutionInterceptor {
 
+    private static final SqsPayloadCodecInterceptor DEFAULT = new SqsPayloadCodecInterceptor(
+            CompressionAlgorithm.NONE,
+            EncodingAlgorithm.NONE,
+            ChecksumAlgorithm.MD5);
+
     private final CompressionAlgorithm compressionAlgorithm;
     private final EncodingAlgorithm encodingAlgorithm;
     private final ChecksumAlgorithm checksumAlgorithm;
-
-    public SqsPayloadCodecInterceptor() {
-        this(CompressionAlgorithm.NONE, EncodingAlgorithm.NONE, ChecksumAlgorithm.MD5);
-    }
 
     @Override
     public SdkRequest modifyRequest(Context.ModifyRequest context, ExecutionAttributes executionAttributes) {
@@ -146,6 +150,11 @@ public class SqsPayloadCodecInterceptor implements ExecutionInterceptor {
 
     private Message decodeMessageIfNeeded(Message message) {
         Map<String, MessageAttributeValue> attributes = message.messageAttributes();
+        if (!PayloadCodecConfigurationAttributeHandler.hasAnyAttributes(attributes)) {
+            // allowing messages queued before this codec was added
+            return message;
+        }
+
         PayloadCodecConfiguration configuration = PayloadCodecConfigurationAttributeHandler.fromAttributes(attributes)
                 .configuration();
         boolean shouldDecode = configuration.compressionAlgorithm() != CompressionAlgorithm.NONE
@@ -179,8 +188,13 @@ public class SqsPayloadCodecInterceptor implements ExecutionInterceptor {
 
     private PayloadCodecConfiguration configuration() {
         return new PayloadCodecConfiguration(
+                PayloadCodecAttributes.VERSION_VALUE,
                 compressionAlgorithm,
                 encodingAlgorithm,
                 checksumAlgorithm);
+    }
+
+    public static SqsPayloadCodecInterceptor defaultInterceptor() {
+        return DEFAULT;
     }
 }

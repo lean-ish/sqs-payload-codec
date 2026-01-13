@@ -7,18 +7,13 @@ package io.github.leanish.sqs.codec.algorithms.encoding;
 
 import java.util.Base64;
 
-import io.github.leanish.sqs.codec.PayloadCodecException;
-import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
-
+/**
+ * Standard Base64 encoder implementation.
+ */
 public final class StandardBase64Encoder implements Encoder {
 
     private static final Base64.Encoder ENCODER = Base64.getEncoder();
     private static final Base64.Decoder DECODER = Base64.getDecoder();
-
-    @Override
-    public EncodingAlgorithm algorithm() {
-        return EncodingAlgorithm.BASE64_STD;
-    }
 
     @Override
     public byte[] encode(byte[] payload) {
@@ -30,7 +25,7 @@ public final class StandardBase64Encoder implements Encoder {
         try {
             return DECODER.decode(encoded);
         } catch (IllegalArgumentException e) {
-            throw new PayloadCodecException("Invalid base64 payload", e);
+            throw new InvalidPayloadException("Invalid base64 payload", e);
         }
     }
 }
