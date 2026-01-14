@@ -1,4 +1,4 @@
-# sqs-payload-codec
+# sqs-codec
 
 AWS SDK v2 execution interceptor for SQS that compresses/encodes message bodies
 and records codec metadata in SQS message attributes, then reverses it on receive.
@@ -14,7 +14,7 @@ and records codec metadata in SQS message attributes, then reverses it on receiv
 Gradle:
 ```kotlin
 dependencies {
-    implementation("io.github.leanish:sqs-payload-codec:<version>")
+    implementation("io.github.leanish:sqs-codec:<version>")
 }
 ```
 

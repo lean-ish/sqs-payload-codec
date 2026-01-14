@@ -1,1 +1,1 @@
-rootProject.name = "sqs-payload-codec"
+rootProject.name = "sqs-codec"

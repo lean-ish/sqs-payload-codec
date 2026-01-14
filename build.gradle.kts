@@ -180,9 +180,9 @@ publishing {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
             pom {
-                name.set("sqs-payload-codec")
+                name.set("sqs-codec")
                 description.set("AWS SQS payload interceptor for zstd+base64 encoding.")
-                url.set("https://github.com/lean-ish/sqs-payload-codec")
+                url.set("https://github.com/lean-ish/sqs-codec")
                 licenses {
                     license {
                         name.set("The MIT License")
@@ -197,9 +197,9 @@ publishing {
                     }
                 }
                 scm {
-                    url.set("https://github.com/lean-ish/sqs-payload-codec")
-                    connection.set("scm:git:https://github.com/lean-ish/sqs-payload-codec.git")
-                    developerConnection.set("scm:git:ssh://git@github.com/lean-ish/sqs-payload-codec.git")
+                    url.set("https://github.com/lean-ish/sqs-codec")
+                    connection.set("scm:git:https://github.com/lean-ish/sqs-codec.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/lean-ish/sqs-codec.git")
                 }
             }
         }
@@ -209,7 +209,7 @@ publishing {
         mavenLocal()
         maven {
             name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/lean-ish/sqs-payload-codec")
+            url = uri("https://maven.pkg.github.com/lean-ish/sqs-codec")
             credentials {
                 username = findProperty("gpr.user") as String? ?: System.getenv("GITHUB_ACTOR")
                 password = findProperty("gpr.key") as String? ?: System.getenv("GITHUB_TOKEN")
