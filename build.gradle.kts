@@ -5,7 +5,7 @@ plugins {
     `maven-publish`
     checkstyle
     jacoco
-    id("com.diffplug.spotless") version "8.1.0"
+    id("com.diffplug.spotless") version "8.2.1"
     id("net.ltgt.errorprone") version "4.4.0"
 }
 
