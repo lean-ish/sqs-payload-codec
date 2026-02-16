@@ -95,11 +95,14 @@ class SqsCodecInterceptorTest {
 
     @Test
     void modifyRequest_alreadyPresentAttributes() {
+        byte[] payloadBytes = PAYLOAD.getBytes(StandardCharsets.UTF_8);
         SendMessageRequest request = SendMessageRequest.builder()
                 .messageBody(PAYLOAD)
                 .messageAttributes(Map.of(
                         CodecAttributes.CONF,
-                        MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=md5")))
+                        MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=md5"),
+                        CodecAttributes.CHECKSUM,
+                        MessageAttributeUtils.stringAttribute(ChecksumAlgorithm.MD5.implementation().checksum(payloadBytes))))
                 .build();
         SqsCodecInterceptor interceptor = SqsCodecInterceptor.defaultInterceptor();
 
@@ -107,6 +110,109 @@ class SqsCodecInterceptorTest {
 
         assertThat(modified)
                 .isSameAs(request);
+    }
+
+    @Test
+    void modifyRequest_alreadyPresentAttributes_missingChecksum() {
+        SendMessageRequest request = SendMessageRequest.builder()
+                .messageBody(PAYLOAD)
+                .messageAttributes(Map.of(
+                        CodecAttributes.CONF,
+                        MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=md5")))
+                .build();
+
+        assertThatThrownBy(() -> SqsCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes()))
+                .isInstanceOfSatisfying(ChecksumValidationException.class, exception -> {
+                    assertThat(exception.detail()).isEqualTo(CodecAttributes.CHECKSUM);
+                })
+                .hasMessage("Missing required SQS attribute: " + CodecAttributes.CHECKSUM);
+    }
+
+    @Test
+    void modifyRequest_alreadyPresentAttributes_checksumMismatch() {
+        SendMessageRequest request = SendMessageRequest.builder()
+                .messageBody(PAYLOAD)
+                .messageAttributes(Map.of(
+                        CodecAttributes.CONF,
+                        MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=md5"),
+                        CodecAttributes.CHECKSUM,
+                        MessageAttributeUtils.stringAttribute("bad")))
+                .build();
+
+        assertThatThrownBy(() -> SqsCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes()))
+                .isInstanceOf(ChecksumValidationException.class)
+                .hasMessage("Payload checksum mismatch");
+    }
+
+    @Test
+    void modifyRequest_alreadyPresentAttributes_checksumPresentYetNoAlgorithm() {
+        SendMessageRequest request = SendMessageRequest.builder()
+                .messageBody(PAYLOAD)
+                .messageAttributes(Map.of(
+                        CodecAttributes.CONF,
+                        MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=none"),
+                        CodecAttributes.CHECKSUM,
+                        MessageAttributeUtils.stringAttribute("bad")))
+                .build();
+
+        assertThatThrownBy(() -> SqsCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes()))
+                .isInstanceOf(ChecksumValidationException.class)
+                .hasMessage("Missing required checksum algorithm");
+    }
+
+    @Test
+    void modifyRequest_alreadyPresentAttributes_blankChecksumYetNoAlgorithm() {
+        SendMessageRequest request = SendMessageRequest.builder()
+                .messageBody(PAYLOAD)
+                .messageAttributes(Map.of(
+                        CodecAttributes.CONF,
+                        MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=none"),
+                        CodecAttributes.CHECKSUM,
+                        MessageAttributeUtils.stringAttribute(" ")))
+                .build();
+
+        assertThatThrownBy(() -> SqsCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes()))
+                .isInstanceOf(ChecksumValidationException.class)
+                .hasMessage("Missing required checksum algorithm");
+    }
+
+    @Test
+    void modifyRequest_alreadyPresentAttributes_invalidEncodedBody() {
+        SendMessageRequest request = SendMessageRequest.builder()
+                .messageBody(PAYLOAD)
+                .messageAttributes(Map.of(
+                        CodecAttributes.CONF,
+                        MessageAttributeUtils.stringAttribute("v=1;c=zstd;e=base64;h=none")))
+                .build();
+
+        assertThatThrownBy(() -> SqsCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes()))
+                .isInstanceOf(InvalidPayloadException.class)
+                .hasMessage("Invalid base64 payload");
+    }
+
+    @Test
+    void modifyRequest_alreadyPresentAttributes_rawLengthMismatchIgnored() {
+        byte[] payloadBytes = PAYLOAD.getBytes(StandardCharsets.UTF_8);
+        SendMessageRequest request = SendMessageRequest.builder()
+                .messageBody(PAYLOAD)
+                .messageAttributes(Map.of(
+                        CodecAttributes.CONF,
+                        MessageAttributeUtils.stringAttribute("v=1;c=none;e=none;h=md5"),
+                        CodecAttributes.CHECKSUM,
+                        MessageAttributeUtils.stringAttribute(ChecksumAlgorithm.MD5.implementation().checksum(payloadBytes)),
+                        CodecAttributes.RAW_LENGTH,
+                        MessageAttributeUtils.numberAttribute(payloadBytes.length + 1)))
+                .build();
+
+        SendMessageRequest encoded = (SendMessageRequest) SqsCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes());
+
+        assertThat(encoded).isSameAs(request);
     }
 
     @Test
@@ -125,24 +231,18 @@ class SqsCodecInterceptorTest {
     }
 
     @Test
-    void modifyRequest_blankAttributes() {
+    void modifyRequest_blankConfigurationAttribute() {
         SendMessageRequest request = SendMessageRequest.builder()
                 .messageBody(PAYLOAD)
                 .messageAttributes(Map.of(
                         CodecAttributes.CONF,
                         MessageAttributeUtils.stringAttribute(" ")))
                 .build();
-        SqsCodecInterceptor interceptor = SqsCodecInterceptor.defaultInterceptor();
 
-        SdkRequest modified = interceptor.modifyRequest(
-                new ModifyRequestContext(request),
-                new ExecutionAttributes());
-
-        assertThat(modified).isInstanceOf(SendMessageRequest.class);
-        assertThat(modified).isNotSameAs(request);
-        SendMessageRequest encoded = (SendMessageRequest) modified;
-        assertThat(encoded.messageAttributes().get(CodecAttributes.CONF).stringValue())
-                .isEqualTo("v=1;c=none;e=none;h=md5");
+        assertThatThrownBy(() -> SqsCodecInterceptor.defaultInterceptor()
+                .modifyRequest(new ModifyRequestContext(request), new ExecutionAttributes()))
+                .isInstanceOf(UnsupportedCodecConfigurationException.class)
+                .hasMessage("Unsupported codec configuration:  ");
     }
 
     @Test
@@ -220,6 +320,11 @@ class SqsCodecInterceptorTest {
 
     @Test
     void modifyRequest_batch() {
+        String skippedPayload = "skip";
+        byte[] skippedPayloadBytes = skippedPayload.getBytes(StandardCharsets.UTF_8);
+        Codec skippedCodec = new Codec(CompressionAlgorithm.ZSTD, EncodingAlgorithm.NONE);
+        String skippedBody = new String(skippedCodec.encode(skippedPayloadBytes), StandardCharsets.UTF_8);
+
         SendMessageBatchRequest request = SendMessageBatchRequest.builder()
                 .entries(
                         SendMessageBatchRequestEntry.builder()
@@ -229,10 +334,13 @@ class SqsCodecInterceptorTest {
                                 .build(),
                         SendMessageBatchRequestEntry.builder()
                                 .id("skipped")
-                                .messageBody("skip")
+                                .messageBody(skippedBody)
                                 .messageAttributes(Map.of(
                                         CodecAttributes.CONF,
-                                        MessageAttributeUtils.stringAttribute("v=1;c=zstd;e=base64;h=md5")))
+                                        MessageAttributeUtils.stringAttribute("v=1;c=zstd;e=base64;h=md5"),
+                                        CodecAttributes.CHECKSUM,
+                                        MessageAttributeUtils.stringAttribute(
+                                                ChecksumAlgorithm.MD5.implementation().checksum(skippedPayloadBytes))))
                                 .build())
                 .build();
         SqsCodecInterceptor interceptor = SqsCodecInterceptor.defaultInterceptor()
@@ -544,22 +652,100 @@ class SqsCodecInterceptorTest {
     }
 
     @Test
-    void modifyResponse_missingChecksumAlgorithm() {
-        byte[] payloadBytes = PAYLOAD.getBytes(StandardCharsets.UTF_8);
-        Map<String, MessageAttributeValue> attributes = Map.of(
-                CodecAttributes.CHECKSUM, MessageAttributeUtils.stringAttribute(ChecksumAlgorithm.MD5.implementation().checksum(payloadBytes)));
+    void modifyResponse_blankConfigurationAttribute() {
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
                 .messages(Message.builder()
                         .body(PAYLOAD)
-                        .messageAttributes(attributes)
+                        .messageAttributes(Map.of(
+                                CodecAttributes.CONF,
+                                MessageAttributeUtils.stringAttribute(" ")))
                         .build())
                 .build();
 
         assertThatThrownBy(() -> SqsCodecInterceptor.defaultInterceptor().modifyResponse(
                 new ModifyResponseContext(response),
                 new ExecutionAttributes()))
-                .isInstanceOf(ChecksumValidationException.class)
-                .hasMessage("Missing required checksum algorithm");
+                .isInstanceOf(UnsupportedCodecConfigurationException.class)
+                .hasMessage("Unsupported codec configuration:  ");
+    }
+
+    @Test
+    void modifyResponse_checksumWithoutConfiguration() {
+        byte[] payloadBytes = PAYLOAD.getBytes(StandardCharsets.UTF_8);
+        Map<String, MessageAttributeValue> attributes = Map.of(
+                CodecAttributes.CHECKSUM, MessageAttributeUtils.stringAttribute(ChecksumAlgorithm.MD5.implementation().checksum(payloadBytes)));
+        Message message = Message.builder()
+                .body(PAYLOAD)
+                .messageAttributes(attributes)
+                .build();
+        ReceiveMessageResponse response = ReceiveMessageResponse.builder()
+                .messages(message)
+                .build();
+
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
+
+        assertThat(decoded.messages().getFirst())
+                .isSameAs(message);
+    }
+
+    @Test
+    void modifyResponse_blankChecksumWithoutConfiguration() {
+        Map<String, MessageAttributeValue> attributes = Map.of(
+                CodecAttributes.CHECKSUM, MessageAttributeUtils.stringAttribute(" "));
+        Message message = Message.builder()
+                .body(PAYLOAD)
+                .messageAttributes(attributes)
+                .build();
+        ReceiveMessageResponse response = ReceiveMessageResponse.builder()
+                .messages(message)
+                .build();
+
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
+
+        assertThat(decoded.messages().getFirst())
+                .isSameAs(message);
+    }
+
+    @Test
+    void modifyResponse_rawLengthWithoutConfiguration() {
+        int payloadLength = PAYLOAD.getBytes(StandardCharsets.UTF_8).length;
+        Map<String, MessageAttributeValue> attributes = Map.of(
+                CodecAttributes.RAW_LENGTH, MessageAttributeUtils.numberAttribute(payloadLength));
+        Message message = Message.builder()
+                .body(PAYLOAD)
+                .messageAttributes(attributes)
+                .build();
+        ReceiveMessageResponse response = ReceiveMessageResponse.builder()
+                .messages(message)
+                .build();
+
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
+
+        assertThat(decoded.messages().getFirst())
+                .isSameAs(message);
+    }
+
+    @Test
+    void modifyResponse_rawLengthMismatchWithoutConfiguration() {
+        int payloadLength = PAYLOAD.getBytes(StandardCharsets.UTF_8).length;
+        Map<String, MessageAttributeValue> attributes = Map.of(
+                CodecAttributes.RAW_LENGTH, MessageAttributeUtils.numberAttribute(payloadLength + 1));
+        Message message = Message.builder()
+                .body(PAYLOAD)
+                .messageAttributes(attributes)
+                .build();
+        ReceiveMessageResponse response = ReceiveMessageResponse.builder()
+                .messages(message)
+                .build();
+
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
+
+        assertThat(decoded.messages().getFirst())
+                .isSameAs(message);
     }
 
     @Test

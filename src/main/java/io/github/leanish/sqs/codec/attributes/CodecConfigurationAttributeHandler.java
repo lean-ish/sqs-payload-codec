@@ -30,16 +30,7 @@ public class CodecConfigurationAttributeHandler {
     }
 
     public static boolean hasCodecAttributes(Map<String, MessageAttributeValue> attributes) {
-        return hasNonBlankAttribute(attributes, CodecAttributes.CONF);
-    }
-
-    public static boolean hasConfigurationAttributes(Map<String, MessageAttributeValue> attributes) {
         return attributes.containsKey(CodecAttributes.CONF);
-    }
-
-    public static boolean hasAnyAttributes(Map<String, MessageAttributeValue> attributes) {
-        return hasConfigurationAttributes(attributes)
-                || PayloadChecksumAttributeHandler.hasAttributes(attributes);
     }
 
     public static CodecConfigurationAttributeHandler forOutbound(CodecConfiguration configuration) {
@@ -79,11 +70,6 @@ public class CodecConfigurationAttributeHandler {
     public void applyTo(Map<String, MessageAttributeValue> attributes) {
         attributes.put(CodecAttributes.CONF,
                 MessageAttributeUtils.stringAttribute(formatConfValue(configuration)));
-    }
-
-    private static boolean hasNonBlankAttribute(Map<String, MessageAttributeValue> attributes, String name) {
-        String value = MessageAttributeUtils.attributeValue(attributes, name);
-        return StringUtils.isNotBlank(value);
     }
 
     private static CodecConfiguration parseConf(String confValue) {

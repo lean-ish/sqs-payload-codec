@@ -70,11 +70,12 @@ Notes:
 - Missing keys default to `none` (including `h`), and `v` defaults to `1`.
 - The interceptor defaults to `h=md5` when encoding.
 - Unknown keys are ignored for forward compatibility.
+- When `x-codec-conf` is already present on send, the interceptor validates that body and checksum match the declared configuration before skipping re-encoding.
 - If compression is not `none` and encoding is `none`, the effective encoding is `base64` (and is written in `x-codec-conf`).
 
 Other attributes:
 - `x-codec-checksum` (String)
-- `x-codec-raw-length` (Number)
+- `x-codec-raw-length` (Number, debug/observability metadata only)
 
 ## Error handling
 
@@ -89,6 +90,8 @@ try {
     // use decoded payloads
 } catch (InvalidPayloadException e) {
     // bad payload data, consider DLQ or logging
+} catch (CompressionException e) {
+    // payload decompression failed
 } catch (CodecException e) {
     // fallback for any other codec issue
 }
@@ -100,7 +103,7 @@ try {
     ReceiveMessageResponse response = client.receiveMessage(request);
     // interceptor validates checksum/attributes during receive
 } catch (ChecksumValidationException e) {
-    // missing algorithm/attribute or checksum mismatch; inspect e.reason()
+    // missing algorithm/attribute or checksum mismatch; inspect e.detail()
 } catch (UnsupportedCodecConfigurationException e) {
     // malformed/duplicate/unsupported codec configuration
 } catch (UnsupportedAlgorithmException e) {

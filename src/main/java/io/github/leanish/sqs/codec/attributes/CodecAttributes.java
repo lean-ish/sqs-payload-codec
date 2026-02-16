@@ -10,8 +10,11 @@ package io.github.leanish.sqs.codec.attributes;
  */
 public class CodecAttributes {
 
+    /** Payload checksum attribute used for integrity validation. */
     public static final String CHECKSUM = "x-codec-checksum";
+    /** Codec configuration attribute containing version/compression/encoding/checksum ids. */
     public static final String CONF = "x-codec-conf";
+    /** Raw payload byte length attribute used for debugging and observability metadata. */
     public static final String RAW_LENGTH = "x-codec-raw-length";
 
     public static final int VERSION_VALUE = 1;

@@ -12,7 +12,9 @@ import org.jspecify.annotations.Nullable;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 
 /**
- * Handles the raw payload length attribute for SQS messages.
+ * Writes the raw payload byte length attribute for SQS messages.
+ *
+ * <p>This attribute is for debugging and observability only. It is intentionally not validated on send/receive.
  */
 public class PayloadRawLengthAttributeHandler {
 

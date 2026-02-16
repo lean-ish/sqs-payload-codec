@@ -33,27 +33,24 @@ public class PayloadChecksumAttributeHandler {
         return new PayloadChecksumAttributeHandler(checksumValue);
     }
 
-    public static boolean hasAttributes(Map<String, MessageAttributeValue> attributes) {
-        return attributes.containsKey(CodecAttributes.CHECKSUM);
-    }
-
     public static boolean needsValidation(
-            @Nullable String checksumValue,
+            boolean checksumAttributePresent,
             ChecksumAlgorithm checksumAlgorithm) {
-        return StringUtils.isNotBlank(checksumValue) || checksumAlgorithm != ChecksumAlgorithm.NONE;
+        return checksumAttributePresent || checksumAlgorithm != ChecksumAlgorithm.NONE;
     }
 
     public static void validate(
             ChecksumAlgorithm checksumAlgorithm,
+            boolean checksumAttributePresent,
             @Nullable String checksumValue,
             byte[] payloadBytes) {
         if (checksumAlgorithm == ChecksumAlgorithm.NONE) {
-            if (StringUtils.isNotBlank(checksumValue)) {
+            if (checksumAttributePresent) {
                 throw ChecksumValidationException.missingAlgorithm();
             }
             return;
         }
-        if (StringUtils.isBlank(checksumValue)) {
+        if (!checksumAttributePresent || StringUtils.isBlank(checksumValue)) {
             throw ChecksumValidationException.missingAttribute(CodecAttributes.CHECKSUM);
         }
 

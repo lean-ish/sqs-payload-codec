@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "io.github.leanish"
-version = "0.3.1-SNAPSHOT"
+version = "0.4.0-SNAPSHOT"
 description = "AWS SQS payload interceptor for zstd+base64 encoding."
 
 val jdkVersion = 21

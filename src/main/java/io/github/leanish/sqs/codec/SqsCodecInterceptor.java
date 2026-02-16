@@ -86,26 +86,15 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private SendMessageRequest encodeSendMessage(SendMessageRequest request) {
         if (CodecConfigurationAttributeHandler.hasCodecAttributes(request.messageAttributes())) {
             // Already encoded upstream; avoid double-encoding or overwriting attributes (if valid)
-            CodecConfigurationAttributeHandler.fromAttributes(request.messageAttributes());
+            validateOutboundPreEncodedPayload(request.messageBody(), request.messageAttributes());
             return request;
         }
 
-        Codec codec = outboundCodec();
-        byte[] payloadBytes = request.messageBody().getBytes(StandardCharsets.UTF_8);
-        CodecConfiguration configuration = configuration();
-
-        Map<String, MessageAttributeValue> attributes = new HashMap<>(request.messageAttributes());
-        CodecConfigurationAttributeHandler.forOutbound(configuration)
-                .applyTo(attributes);
-        PayloadRawLengthAttributeHandler.forOutbound(payloadBytes.length)
-                .applyTo(attributes);
-        PayloadChecksumAttributeHandler.forOutbound(configuration.checksumAlgorithm(), payloadBytes)
-                .applyTo(attributes);
-        String encodedBody = new String(codec.encode(payloadBytes), StandardCharsets.UTF_8);
+        EncodedMessage encoded = encode(request.messageBody(), request.messageAttributes());
 
         return request.toBuilder()
-                .messageBody(encodedBody)
-                .messageAttributes(attributes)
+                .messageBody(encoded.body)
+                .messageAttributes(encoded.attributes)
                 .build();
     }
 
@@ -124,15 +113,24 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private SendMessageBatchRequestEntry encodeSendMessageEntry(SendMessageBatchRequestEntry entry) {
         if (CodecConfigurationAttributeHandler.hasCodecAttributes(entry.messageAttributes())) {
             // Already encoded upstream; avoid double-encoding or overwriting attributes (if valid)
-            CodecConfigurationAttributeHandler.fromAttributes(entry.messageAttributes());
+            validateOutboundPreEncodedPayload(entry.messageBody(), entry.messageAttributes());
             return entry;
         }
 
+        EncodedMessage encoded = encode(entry.messageBody(), entry.messageAttributes());
+
+        return entry.toBuilder()
+                .messageBody(encoded.body)
+                .messageAttributes(encoded.attributes)
+                .build();
+    }
+
+    private EncodedMessage encode(String originalBody, Map<String, MessageAttributeValue> originalAttributes) {
         Codec codec = outboundCodec();
-        byte[] payloadBytes = entry.messageBody().getBytes(StandardCharsets.UTF_8);
+        byte[] payloadBytes = originalBody.getBytes(StandardCharsets.UTF_8);
         CodecConfiguration configuration = configuration();
 
-        Map<String, MessageAttributeValue> attributes = new HashMap<>(entry.messageAttributes());
+        Map<String, MessageAttributeValue> attributes = new HashMap<>(originalAttributes);
         CodecConfigurationAttributeHandler.forOutbound(configuration)
                 .applyTo(attributes);
         PayloadRawLengthAttributeHandler.forOutbound(payloadBytes.length)
@@ -141,10 +139,22 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
                 .applyTo(attributes);
         String encodedBody = new String(codec.encode(payloadBytes), StandardCharsets.UTF_8);
 
-        return entry.toBuilder()
-                .messageBody(encodedBody)
-                .messageAttributes(attributes)
-                .build();
+        return new EncodedMessage(encodedBody, attributes);
+    }
+
+    private void validateOutboundPreEncodedPayload(String messageBody, Map<String, MessageAttributeValue> attributes) {
+        CodecConfiguration configuration = CodecConfigurationAttributeHandler.fromAttributes(attributes)
+                .configuration();
+        byte[] payloadBytes = decodePayloadIfNeeded(messageBody, configuration);
+        boolean checksumAttributePresent = attributes.containsKey(CodecAttributes.CHECKSUM);
+        String checksumValue = MessageAttributeUtils.attributeValue(attributes, CodecAttributes.CHECKSUM);
+        if (PayloadChecksumAttributeHandler.needsValidation(checksumAttributePresent, configuration.checksumAlgorithm())) {
+            PayloadChecksumAttributeHandler.validate(
+                    configuration.checksumAlgorithm(),
+                    checksumAttributePresent,
+                    checksumValue,
+                    payloadBytes);
+        }
     }
 
     private ReceiveMessageRequest ensureCodecAttributesRequested(ReceiveMessageRequest request) {
@@ -177,29 +187,31 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
 
     private Message decodeMessageIfNeeded(Message message) {
         Map<String, MessageAttributeValue> attributes = message.messageAttributes();
-        if (!CodecConfigurationAttributeHandler.hasAnyAttributes(attributes)) {
+        if (!CodecConfigurationAttributeHandler.hasCodecAttributes(attributes)) {
             // allowing messages queued before this codec was added
             return message;
         }
 
         CodecConfiguration configuration = CodecConfigurationAttributeHandler.fromAttributes(attributes)
                 .configuration();
-        boolean shouldDecode = configuration.compressionAlgorithm() != CompressionAlgorithm.NONE
-                || configuration.encodingAlgorithm() != EncodingAlgorithm.NONE;
+        boolean shouldDecode = shouldDecode(configuration);
+        boolean checksumAttributePresent = attributes.containsKey(CodecAttributes.CHECKSUM);
         String checksumValue = MessageAttributeUtils.attributeValue(attributes, CodecAttributes.CHECKSUM);
-        boolean shouldValidateChecksum = PayloadChecksumAttributeHandler.needsValidation(checksumValue, configuration.checksumAlgorithm());
+        boolean shouldValidateChecksum = PayloadChecksumAttributeHandler.needsValidation(
+                checksumAttributePresent,
+                configuration.checksumAlgorithm());
         if (!shouldDecode && !shouldValidateChecksum) {
             return message;
         }
 
-        byte[] payloadBytes;
-        if (shouldDecode) {
-            Codec codec = new Codec(configuration.compressionAlgorithm(), configuration.encodingAlgorithm());
-            payloadBytes = codec.decode(message.body().getBytes(StandardCharsets.UTF_8));
-        } else {
-            payloadBytes = message.body().getBytes(StandardCharsets.UTF_8);
+        byte[] payloadBytes = decodePayloadIfNeeded(message.body(), configuration);
+        if (shouldValidateChecksum) {
+            PayloadChecksumAttributeHandler.validate(
+                    configuration.checksumAlgorithm(),
+                    checksumAttributePresent,
+                    checksumValue,
+                    payloadBytes);
         }
-        PayloadChecksumAttributeHandler.validate(configuration.checksumAlgorithm(), checksumValue, payloadBytes);
         if (!shouldDecode) {
             return message;
         }
@@ -207,6 +219,19 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
         return message.toBuilder()
                 .body(new String(payloadBytes, StandardCharsets.UTF_8))
                 .build();
+    }
+
+    private byte[] decodePayloadIfNeeded(String messageBody, CodecConfiguration configuration) {
+        if (!shouldDecode(configuration)) {
+            return messageBody.getBytes(StandardCharsets.UTF_8);
+        }
+        Codec codec = new Codec(configuration.compressionAlgorithm(), configuration.encodingAlgorithm());
+        return codec.decode(messageBody.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private boolean shouldDecode(CodecConfiguration configuration) {
+        return configuration.compressionAlgorithm() != CompressionAlgorithm.NONE
+                || configuration.encodingAlgorithm() != EncodingAlgorithm.NONE;
     }
 
     private Codec outboundCodec() {
@@ -223,5 +248,8 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
 
     public static SqsCodecInterceptor defaultInterceptor() {
         return DEFAULT;
+    }
+
+    private record EncodedMessage(String body, Map<String, MessageAttributeValue> attributes) {
     }
 }

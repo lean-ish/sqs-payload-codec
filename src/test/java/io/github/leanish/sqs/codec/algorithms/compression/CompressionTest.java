@@ -9,7 +9,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.stream.Stream;
 import java.util.zip.ZipException;
@@ -51,9 +50,11 @@ class CompressionTest {
     void decompress_invalidPayload(
             Compressor compressor,
             String payload,
-            Class<? extends IOException> expectedCause) {
+            Class<? extends IOException> expectedCause,
+            String expectedMessage) {
         assertThatThrownBy(() -> compressor.decompress(payload.getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(UncheckedIOException.class)
+                .isInstanceOf(CompressionException.class)
+                .hasMessage(expectedMessage)
                 .hasCauseInstanceOf(expectedCause);
     }
 
@@ -67,8 +68,20 @@ class CompressionTest {
 
     private static Stream<Arguments> invalidDecompressionCases() {
         return Stream.of(
-                Arguments.of(new GzipCompressor(), "not-gzip", ZipException.class),
-                Arguments.of(new ZstdCompressor(), "not-zstd", ZstdIOException.class),
-                Arguments.of(new SnappyCompressor(), "not-snappy", IOException.class));
+                Arguments.of(
+                        new GzipCompressor(),
+                        "not-gzip",
+                        ZipException.class,
+                        "Failed to decompress payload with gzip"),
+                Arguments.of(
+                        new ZstdCompressor(),
+                        "not-zstd",
+                        ZstdIOException.class,
+                        "Failed to decompress payload with zstd"),
+                Arguments.of(
+                        new SnappyCompressor(),
+                        "not-snappy",
+                        IOException.class,
+                        "Failed to decompress payload with snappy"));
     }
 }

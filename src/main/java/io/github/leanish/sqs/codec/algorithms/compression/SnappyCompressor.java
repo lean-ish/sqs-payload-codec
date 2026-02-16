@@ -6,7 +6,6 @@
 package io.github.leanish.sqs.codec.algorithms.compression;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 
 import org.xerial.snappy.Snappy;
 
@@ -18,12 +17,14 @@ import com.google.errorprone.annotations.Immutable;
 @Immutable
 public class SnappyCompressor implements Compressor {
 
+    private static final String ALGORITHM = "snappy";
+
     @Override
     public byte[] compress(byte[] payload) {
         try {
             return Snappy.compress(payload);
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw CompressionException.compress(ALGORITHM, e);
         }
     }
 
@@ -32,7 +33,7 @@ public class SnappyCompressor implements Compressor {
         try {
             return Snappy.uncompress(payload);
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw CompressionException.decompress(ALGORITHM, e);
         }
     }
 }

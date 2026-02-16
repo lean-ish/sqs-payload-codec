@@ -10,7 +10,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UncheckedIOException;
 
 import com.github.luben.zstd.ZstdInputStreamNoFinalizer;
 import com.github.luben.zstd.ZstdOutputStreamNoFinalizer;
@@ -22,6 +21,8 @@ import com.google.errorprone.annotations.Immutable;
 @Immutable
 public class ZstdCompressor implements Compressor {
 
+    private static final String ALGORITHM = "zstd";
+
     @Override
     public byte[] compress(byte[] payload) {
         try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
@@ -30,7 +31,7 @@ public class ZstdCompressor implements Compressor {
             }
             return outputStream.toByteArray();
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw CompressionException.compress(ALGORITHM, e);
         }
     }
 
@@ -42,7 +43,7 @@ public class ZstdCompressor implements Compressor {
             inputStream.transferTo(outputStream);
             return outputStream.toByteArray();
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw CompressionException.decompress(ALGORITHM, e);
         }
     }
 }
