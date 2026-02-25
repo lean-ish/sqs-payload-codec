@@ -45,6 +45,7 @@ import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class SqsCodecInterceptor implements ExecutionInterceptor {
 
+    private static final int MAX_SQS_MESSAGE_ATTRIBUTES = 10;
     private static final SqsCodecInterceptor DEFAULT = new SqsCodecInterceptor(
             CompressionAlgorithm.NONE,
             EncodingAlgorithm.NONE,
@@ -57,6 +58,14 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private final CompressionAlgorithm compressionAlgorithm;
     private final EncodingAlgorithm encodingAlgorithm;
     private final ChecksumAlgorithm checksumAlgorithm;
+    private final boolean rawLengthAttributeEnabled;
+
+    private SqsCodecInterceptor(
+            CompressionAlgorithm compressionAlgorithm,
+            EncodingAlgorithm encodingAlgorithm,
+            ChecksumAlgorithm checksumAlgorithm) {
+        this(compressionAlgorithm, encodingAlgorithm, checksumAlgorithm, false);
+    }
 
     @Override
     public SdkRequest modifyRequest(Context.ModifyRequest context, ExecutionAttributes executionAttributes) {
@@ -86,6 +95,7 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private SendMessageRequest encodeSendMessage(SendMessageRequest request) {
         if (CodecConfigurationAttributeHandler.hasCodecAttributes(request.messageAttributes())) {
             // Already encoded upstream; avoid double-encoding or overwriting attributes (if valid)
+            validateOutboundAttributeCount(request.messageAttributes());
             validateOutboundPreEncodedPayload(request.messageBody(), request.messageAttributes());
             return request;
         }
@@ -113,6 +123,7 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private SendMessageBatchRequestEntry encodeSendMessageEntry(SendMessageBatchRequestEntry entry) {
         if (CodecConfigurationAttributeHandler.hasCodecAttributes(entry.messageAttributes())) {
             // Already encoded upstream; avoid double-encoding or overwriting attributes (if valid)
+            validateOutboundAttributeCount(entry.messageAttributes());
             validateOutboundPreEncodedPayload(entry.messageBody(), entry.messageAttributes());
             return entry;
         }
@@ -133,10 +144,13 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
         Map<String, MessageAttributeValue> attributes = new HashMap<>(originalAttributes);
         CodecConfigurationAttributeHandler.forOutbound(configuration)
                 .applyTo(attributes);
-        PayloadRawLengthAttributeHandler.forOutbound(payloadBytes.length)
-                .applyTo(attributes);
+        if (rawLengthAttributeEnabled) {
+            PayloadRawLengthAttributeHandler.forOutbound(payloadBytes.length)
+                    .applyTo(attributes);
+        }
         PayloadChecksumAttributeHandler.forOutbound(configuration.checksumAlgorithm(), payloadBytes)
                 .applyTo(attributes);
+        validateOutboundAttributeCount(attributes);
         String encodedBody = new String(codec.encode(payloadBytes), StandardCharsets.UTF_8);
 
         return new EncodedMessage(encodedBody, attributes);
@@ -244,6 +258,21 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
                 compressionAlgorithm,
                 encodingAlgorithm,
                 checksumAlgorithm);
+    }
+
+    private void validateOutboundAttributeCount(Map<String, MessageAttributeValue> attributes) {
+        int attributeCount = attributes.size();
+        if (attributeCount <= MAX_SQS_MESSAGE_ATTRIBUTES) {
+            return;
+        }
+
+        String rawLengthHint = rawLengthAttributeEnabled
+                ? " or disable x-codec-raw-length with withRawLengthAttributeEnabled(false)"
+                : "";
+        throw new CodecException(
+                "SQS supports at most " + MAX_SQS_MESSAGE_ATTRIBUTES
+                        + " message attributes, but request has " + attributeCount
+                        + "; reduce custom attributes" + rawLengthHint);
     }
 
     public static SqsCodecInterceptor defaultInterceptor() {
