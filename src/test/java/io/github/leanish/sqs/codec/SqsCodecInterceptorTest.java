@@ -490,7 +490,7 @@ class SqsCodecInterceptorTest {
 
     @ParameterizedTest
     @MethodSource("checksumAlgorithms")
-    void modifyResponsemissingCodecAttributes(ChecksumAlgorithm checksumAlgorithm) {
+    void modifyResponse_missingCodecAttributes(ChecksumAlgorithm checksumAlgorithm) {
         byte[] payloadBytes = PAYLOAD.getBytes(StandardCharsets.UTF_8);
         Map<String, MessageAttributeValue> attributes = new HashMap<>();
         attributes.put(

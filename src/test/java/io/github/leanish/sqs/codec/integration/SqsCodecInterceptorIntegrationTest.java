@@ -72,19 +72,19 @@ class SqsCodecInterceptorIntegrationTest {
 
             assertThat(message.body())
                     .isEqualTo(payload);
-                assertThat(message.messageAttributes())
-                        .containsKeys(
-                                CodecAttributes.CONF,
-                                CodecAttributes.CHECKSUM,
-                                "shopId");
+            assertThat(message.messageAttributes())
+                    .containsKeys(
+                            CodecAttributes.CONF,
+                            CodecAttributes.CHECKSUM,
+                            "shopId");
 
             Map<String, MessageAttributeValue> attributes = message.messageAttributes();
-                assertThat(attributes.get(CodecAttributes.CONF).stringValue())
-                        .isEqualTo("v=1;c=zstd;e=base64;h=md5");
-                assertThat(attributes)
-                        .doesNotContainKey(CodecAttributes.RAW_LENGTH);
-                assertThat(attributes.get(CodecAttributes.CHECKSUM).stringValue())
-                        .isEqualTo(ChecksumAlgorithm.MD5.implementation().checksum(payloadBytes));
+            assertThat(attributes.get(CodecAttributes.CONF).stringValue())
+                    .isEqualTo("v=1;c=zstd;e=base64;h=md5");
+            assertThat(attributes)
+                    .doesNotContainKey(CodecAttributes.RAW_LENGTH);
+            assertThat(attributes.get(CodecAttributes.CHECKSUM).stringValue())
+                    .isEqualTo(ChecksumAlgorithm.MD5.implementation().checksum(payloadBytes));
         }
     }
 

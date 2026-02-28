@@ -11,8 +11,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
@@ -160,14 +158,8 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
         CodecConfiguration configuration = CodecConfigurationAttributeHandler.fromAttributes(attributes)
                 .configuration();
         byte[] payloadBytes = decodePayloadIfNeeded(messageBody, configuration);
-        boolean checksumAttributePresent = attributes.containsKey(CodecAttributes.CHECKSUM);
-        String checksumValue = MessageAttributeUtils.attributeValue(attributes, CodecAttributes.CHECKSUM);
-        if (PayloadChecksumAttributeHandler.needsValidation(checksumAttributePresent, configuration.checksumAlgorithm())) {
-            PayloadChecksumAttributeHandler.validate(
-                    configuration.checksumAlgorithm(),
-                    checksumAttributePresent,
-                    checksumValue,
-                    payloadBytes);
+        if (shouldValidateChecksum(configuration, attributes)) {
+            validateChecksum(configuration, attributes, payloadBytes);
         }
     }
 
@@ -177,10 +169,9 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
             return request;
         }
 
-        Set<String> neededAttributeNames = Stream.concat(attributeNames.stream(), CODEC_ATTRIBUTE_NAMES.stream())
-                .collect(Collectors.toUnmodifiableSet());
+        attributeNames.addAll(CODEC_ATTRIBUTE_NAMES);
         return request.toBuilder()
-                .messageAttributeNames(neededAttributeNames)
+                .messageAttributeNames(attributeNames)
                 .build();
     }
 
@@ -209,22 +200,14 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
         CodecConfiguration configuration = CodecConfigurationAttributeHandler.fromAttributes(attributes)
                 .configuration();
         boolean shouldDecode = shouldDecode(configuration);
-        boolean checksumAttributePresent = attributes.containsKey(CodecAttributes.CHECKSUM);
-        String checksumValue = MessageAttributeUtils.attributeValue(attributes, CodecAttributes.CHECKSUM);
-        boolean shouldValidateChecksum = PayloadChecksumAttributeHandler.needsValidation(
-                checksumAttributePresent,
-                configuration.checksumAlgorithm());
+        boolean shouldValidateChecksum = shouldValidateChecksum(configuration, attributes);
         if (!shouldDecode && !shouldValidateChecksum) {
             return message;
         }
 
         byte[] payloadBytes = decodePayloadIfNeeded(message.body(), configuration);
         if (shouldValidateChecksum) {
-            PayloadChecksumAttributeHandler.validate(
-                    configuration.checksumAlgorithm(),
-                    checksumAttributePresent,
-                    checksumValue,
-                    payloadBytes);
+            validateChecksum(configuration, attributes, payloadBytes);
         }
         if (!shouldDecode) {
             return message;
@@ -246,6 +229,27 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private boolean shouldDecode(CodecConfiguration configuration) {
         return configuration.compressionAlgorithm() != CompressionAlgorithm.NONE
                 || configuration.encodingAlgorithm() != EncodingAlgorithm.NONE;
+    }
+
+    private boolean shouldValidateChecksum(
+            CodecConfiguration configuration,
+            Map<String, MessageAttributeValue> attributes) {
+        return PayloadChecksumAttributeHandler.needsValidation(
+                attributes.containsKey(CodecAttributes.CHECKSUM),
+                configuration.checksumAlgorithm());
+    }
+
+    private void validateChecksum(
+            CodecConfiguration configuration,
+            Map<String, MessageAttributeValue> attributes,
+            byte[] payloadBytes) {
+        boolean checksumAttributePresent = attributes.containsKey(CodecAttributes.CHECKSUM);
+        String checksumValue = MessageAttributeUtils.attributeValue(attributes, CodecAttributes.CHECKSUM);
+        PayloadChecksumAttributeHandler.validate(
+                configuration.checksumAlgorithm(),
+                checksumAttributePresent,
+                checksumValue,
+                payloadBytes);
     }
 
     private Codec outboundCodec() {
