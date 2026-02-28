@@ -23,17 +23,14 @@ import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 public class CodecMetadataAttributeHandler {
 
     private final CodecConfiguration configuration;
-    private final EncodingAlgorithm metadataEncodingAlgorithm;
     private final @Nullable String checksumValue;
     private final int rawLength;
 
     private CodecMetadataAttributeHandler(
             CodecConfiguration configuration,
-            EncodingAlgorithm metadataEncodingAlgorithm,
             @Nullable String checksumValue,
             int rawLength) {
         this.configuration = configuration;
-        this.metadataEncodingAlgorithm = metadataEncodingAlgorithm;
         this.checksumValue = checksumValue;
         this.rawLength = rawLength;
     }
@@ -43,9 +40,6 @@ public class CodecMetadataAttributeHandler {
     }
 
     public static CodecMetadataAttributeHandler forOutbound(CodecConfiguration configuration, byte[] payloadBytes) {
-        EncodingAlgorithm effectiveEncoding = EncodingAlgorithm.effectiveFor(
-                configuration.compressionAlgorithm(),
-                configuration.encodingAlgorithm());
         @Nullable
         String checksumValue = null;
         if (configuration.checksumAlgorithm() != ChecksumAlgorithm.NONE) {
@@ -55,7 +49,6 @@ public class CodecMetadataAttributeHandler {
         }
         return new CodecMetadataAttributeHandler(
                 configuration,
-                effectiveEncoding,
                 checksumValue,
                 payloadBytes.length);
     }
@@ -153,7 +146,6 @@ public class CodecMetadataAttributeHandler {
                 checksumAlgorithm);
         return new CodecMetadataAttributeHandler(
                 configuration,
-                encodingAlgorithm,
                 checksumValue,
                 rawLength);
     }
@@ -189,9 +181,12 @@ public class CodecMetadataAttributeHandler {
     }
 
     private String formatMetadataValue() {
+        EncodingAlgorithm effectiveEncoding = EncodingAlgorithm.effectiveFor(
+                configuration.compressionAlgorithm(),
+                configuration.encodingAlgorithm());
         String metadataValue = "v=" + configuration.version()
                 + ";c=" + configuration.compressionAlgorithm().id()
-                + ";e=" + metadataEncodingAlgorithm.id()
+                + ";e=" + effectiveEncoding.id()
                 + ";h=" + configuration.checksumAlgorithm().id();
         if (checksumValue == null) {
             return metadataValue + ";l=" + rawLength;
