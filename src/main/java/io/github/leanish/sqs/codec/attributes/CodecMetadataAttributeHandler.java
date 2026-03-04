@@ -14,11 +14,10 @@ import org.jspecify.annotations.Nullable;
 import io.github.leanish.sqs.codec.CodecConfiguration;
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
-import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 
 /**
- * Parses and writes codec metadata attributes for SQS messages.
+ * Parses and writes the single codec metadata attribute for SQS messages.
  */
 public class CodecMetadataAttributeHandler {
 
@@ -86,7 +85,6 @@ public class CodecMetadataAttributeHandler {
 
         int version = CodecAttributes.VERSION_VALUE;
         CompressionAlgorithm compressionAlgorithm = CompressionAlgorithm.NONE;
-        EncodingAlgorithm encodingAlgorithm = EncodingAlgorithm.NONE;
         ChecksumAlgorithm checksumAlgorithm = ChecksumAlgorithm.NONE;
 
         String[] parts = trimmed.split(";", -1);
@@ -102,7 +100,13 @@ public class CodecMetadataAttributeHandler {
             }
             String key = entry.substring(0, idx).trim().toLowerCase(Locale.ROOT);
             String value = entry.substring(idx + 1).trim();
-            if (key.isEmpty() || (value.isEmpty()
+            boolean knownKey = CodecAttributes.META_VERSION_KEY.equals(key)
+                    || CodecAttributes.META_COMPRESSION_KEY.equals(key)
+                    || CodecAttributes.META_CHECKSUM_ALGORITHM_KEY.equals(key)
+                    || CodecAttributes.META_CHECKSUM_VALUE_KEY.equals(key)
+                    || CodecAttributes.META_RAW_LENGTH_KEY.equals(key);
+            if (key.isEmpty() || (knownKey
+                    && value.isEmpty()
                     && !CodecAttributes.META_CHECKSUM_VALUE_KEY.equals(key)
                     && !CodecAttributes.META_RAW_LENGTH_KEY.equals(key))) {
                 throw UnsupportedCodecMetadataException.malformed(metadataValue);
@@ -112,6 +116,7 @@ public class CodecMetadataAttributeHandler {
             }
         }
 
+        // Unknown keys are intentionally ignored for forward compatibility.
         String versionValue = values.get(CodecAttributes.META_VERSION_KEY);
         if (versionValue != null) {
             try {
@@ -128,10 +133,6 @@ public class CodecMetadataAttributeHandler {
         if (compressionValue != null) {
             compressionAlgorithm = CompressionAlgorithm.fromId(compressionValue);
         }
-        String encodingValue = values.get(CodecAttributes.META_ENCODING_KEY);
-        if (encodingValue != null) {
-            encodingAlgorithm = EncodingAlgorithm.fromId(encodingValue);
-        }
         String checksumAlgorithmValue = values.get(CodecAttributes.META_CHECKSUM_ALGORITHM_KEY);
         if (checksumAlgorithmValue != null) {
             checksumAlgorithm = ChecksumAlgorithm.fromId(checksumAlgorithmValue);
@@ -142,7 +143,6 @@ public class CodecMetadataAttributeHandler {
         CodecConfiguration configuration = new CodecConfiguration(
                 version,
                 compressionAlgorithm,
-                encodingAlgorithm,
                 checksumAlgorithm);
         return new CodecMetadataAttributeHandler(
                 configuration,
@@ -182,12 +182,8 @@ public class CodecMetadataAttributeHandler {
     }
 
     private String formatMetadataValue() {
-        EncodingAlgorithm effectiveEncoding = EncodingAlgorithm.effectiveFor(
-                configuration.compressionAlgorithm(),
-                configuration.encodingAlgorithm());
         String metadataValue = "v=" + configuration.version()
                 + ";c=" + configuration.compressionAlgorithm().id()
-                + ";e=" + effectiveEncoding.id()
                 + ";h=" + configuration.checksumAlgorithm().id();
         if (checksumValue == null) {
             return metadataValue + ";l=" + rawLength;

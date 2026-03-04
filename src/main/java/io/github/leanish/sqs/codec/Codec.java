@@ -6,32 +6,36 @@
 package io.github.leanish.sqs.codec;
 
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
-import io.github.leanish.sqs.codec.algorithms.EncodingAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.compression.Compressor;
-import io.github.leanish.sqs.codec.algorithms.encoding.Encoder;
+import io.github.leanish.sqs.codec.algorithms.encoding.Base64Encoder;
 
 class Codec {
 
+    private static final Base64Encoder BASE64_ENCODER = new Base64Encoder();
+
     private final Compressor compressor;
-    private final Encoder encoder;
+    private final boolean compressionEnabled;
 
-    Codec() {
-        this(CompressionAlgorithm.NONE, EncodingAlgorithm.NONE);
-    }
-
-    Codec(
-            CompressionAlgorithm compressionAlgorithm,
-            EncodingAlgorithm encoding) {
-        EncodingAlgorithm effectiveEncoding = EncodingAlgorithm.effectiveFor(compressionAlgorithm, encoding);
+    Codec(CompressionAlgorithm compressionAlgorithm) {
         this.compressor = compressionAlgorithm.implementation();
-        this.encoder = effectiveEncoding.implementation();
+        this.compressionEnabled = compressionAlgorithm != CompressionAlgorithm.NONE;
     }
 
     public byte[] encode(byte[] payload) {
-        return encoder.encode(compressor.compress(payload));
+        if (!compressionEnabled) {
+            return payload;
+        }
+
+        byte[] compressed = compressor.compress(payload);
+        return BASE64_ENCODER.encode(compressed);
     }
 
-    public byte[] decode(byte[] encoded) {
-        return compressor.decompress(encoder.decode(encoded));
+    public byte[] decode(byte[] payload) {
+        if (!compressionEnabled) {
+            return payload;
+        }
+
+        byte[] decoded = BASE64_ENCODER.decode(payload);
+        return compressor.decompress(decoded);
     }
 }
