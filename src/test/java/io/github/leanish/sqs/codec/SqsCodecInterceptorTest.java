@@ -28,6 +28,7 @@ import org.reactivestreams.Publisher;
 import io.github.leanish.sqs.codec.algorithms.ChecksumAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.CompressionAlgorithm;
 import io.github.leanish.sqs.codec.algorithms.UnsupportedAlgorithmException;
+import io.github.leanish.sqs.codec.algorithms.encoding.Base64Encoder;
 import io.github.leanish.sqs.codec.algorithms.encoding.InvalidPayloadException;
 import io.github.leanish.sqs.codec.attributes.ChecksumValidationException;
 import io.github.leanish.sqs.codec.attributes.CodecAttributes;
@@ -103,6 +104,26 @@ class SqsCodecInterceptorTest {
                 .isEqualTo("v=1;c=none;h=md5;s=" + expectedChecksum + ";l=12");
         assertThat(encoded.messageAttributes())
                 .containsOnlyKeys(CodecAttributes.META);
+    }
+
+    @Test
+    void modifyRequest_prefersOriginalPayloadWhenCompressedPayloadHasEqualSize() {
+        String payload = payloadWithEqualEncodedLength(CompressionAlgorithm.GZIP);
+        byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
+        SqsCodecInterceptor interceptor = SqsCodecInterceptor.defaultInterceptor()
+                .withCompressionAlgorithm(CompressionAlgorithm.GZIP);
+        SendMessageRequest request = SendMessageRequest.builder()
+                .messageBody(payload)
+                .build();
+
+        SendMessageRequest encoded = (SendMessageRequest) interceptor.modifyRequest(
+                new ModifyRequestContext(request),
+                new ExecutionAttributes());
+
+        assertThat(encoded.messageBody()).isEqualTo(payload);
+        String expectedChecksum = ChecksumAlgorithm.MD5.implementation().checksum(payloadBytes);
+        assertThat(encoded.messageAttributes().get(CodecAttributes.META).stringValue())
+                .isEqualTo("v=1;c=none;h=md5;s=" + expectedChecksum + ";l=" + payloadBytes.length);
     }
 
     @Test
@@ -580,6 +601,28 @@ class SqsCodecInterceptorTest {
     }
 
     @Test
+    void modifyResponse_unknownMetadataKeyWithoutCompressionLeavesBodyAsIs() {
+        String encodedBody = new String(
+                new Base64Encoder().encode(PAYLOAD.getBytes(StandardCharsets.UTF_8)),
+                StandardCharsets.UTF_8);
+        Message message = Message.builder()
+                .body(encodedBody)
+                .messageAttributes(Map.of(
+                        CodecAttributes.META,
+                        MessageAttributeUtils.stringAttribute("v=1;c=none;x=base64;h=none;l=12")))
+                .build();
+        ReceiveMessageResponse response = ReceiveMessageResponse.builder()
+                .messages(message)
+                .build();
+
+        ReceiveMessageResponse decoded = (ReceiveMessageResponse) SqsCodecInterceptor.defaultInterceptor()
+                .modifyResponse(new ModifyResponseContext(response), new ExecutionAttributes());
+
+        assertThat(decoded.messages().get(0)).isSameAs(message);
+        assertThat(decoded.messages().get(0).body()).isEqualTo(encodedBody);
+    }
+
+    @Test
     void modifyResponse_noMessages() {
         ReceiveMessageResponse response = ReceiveMessageResponse.builder()
                 .messages(List.of())
@@ -918,6 +961,18 @@ class SqsCodecInterceptorTest {
                         duplicateKey,
                         UnsupportedCodecMetadataException.class,
                         "Duplicate codec metadata key: c"));
+    }
+
+    private static String payloadWithEqualEncodedLength(CompressionAlgorithm compressionAlgorithm) {
+        Codec codec = new Codec(compressionAlgorithm);
+        for (int length = 1; length <= 4096; length++) {
+            String payload = "a".repeat(length);
+            byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
+            if (codec.encode(payloadBytes).length == payloadBytes.length) {
+                return payload;
+            }
+        }
+        throw new IllegalStateException("No payload produced equal compressed size for " + compressionAlgorithm.id());
     }
 
     private static Map<String, MessageAttributeValue> codecAttributes(

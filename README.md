@@ -8,8 +8,8 @@ When compression is enabled, the compressed binary bytes are URL-safe Base64 enc
 ## Features
 - Compression: `ZSTD`, `SNAPPY`, `GZIP`, `NONE`
 - Checksums: `MD5`, `SHA256`, `NONE`
-- Config-driven encoding/checksum on send
-- Metadata-driven decoding/validation on receive (using message attribute `x-codec-meta`)
+- Config-driven compression/checksum on send
+- Metadata-driven decompression/validation on receive (using message attribute `x-codec-meta`)
 
 ## Usage
 
@@ -52,10 +52,10 @@ SqsClient client = SqsClient.builder()
 Defaults:
 - Compression: `NONE`
 - Checksum: `MD5`
-- Prefer-smaller optimization: enabled
+- `skipCompressionWhenLarger`: `true`
 - When `withSkipCompressionWhenLarger(true)` (default) and compression is enabled, if compressed payload would be larger than the original body, the interceptor sends the original body and writes `c=none`.
 
-Disable payload-size optimization and always use configured compression:
+Disable `skipCompressionWhenLarger` and always use configured compression:
 ```java
 SqsCodecInterceptor interceptor = SqsCodecInterceptor.defaultInterceptor()
         .withSkipCompressionWhenLarger(false);

@@ -159,7 +159,7 @@ class CodecMetadataAttributeHandlerTest {
     private static Stream<Arguments> unknownKeyToleranceCases() {
         return Stream.of(
                 Arguments.of(
-                        "v=1;c=gzip;e=base64;h=md5;s=abc;l=12;x=ignored;extra=value",
+                        "v=1;c=gzip;x=base64;h=md5;s=abc;l=12;y=ignored;extra=value",
                         new CodecConfiguration(
                                 CodecAttributes.VERSION_VALUE,
                                 CompressionAlgorithm.GZIP,

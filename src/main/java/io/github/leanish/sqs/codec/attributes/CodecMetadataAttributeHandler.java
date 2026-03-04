@@ -110,6 +110,7 @@ public class CodecMetadataAttributeHandler {
             }
         }
 
+        // Unknown keys are intentionally ignored for forward compatibility.
         String versionValue = values.get(CodecAttributes.META_VERSION_KEY);
         if (versionValue != null) {
             try {

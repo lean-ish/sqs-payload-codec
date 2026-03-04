@@ -21,12 +21,14 @@ class CodecTest {
     void encode_default() {
         Codec codec = new Codec();
         String payload = "payload-42";
+        byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
 
-        byte[] encoded = codec.encode(payload.getBytes(StandardCharsets.UTF_8));
+        byte[] encoded = codec.encode(payloadBytes);
+        byte[] decoded = codec.decode(encoded);
 
         assertThat(new String(encoded, StandardCharsets.UTF_8))
                 .isEqualTo(payload);
-        assertThat(new String(codec.decode(encoded), StandardCharsets.UTF_8))
+        assertThat(new String(decoded, StandardCharsets.UTF_8))
                 .isEqualTo(payload);
     }
 
