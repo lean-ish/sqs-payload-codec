@@ -173,6 +173,14 @@ class CodecMetadataAttributeHandlerTest {
                                 CompressionAlgorithm.NONE,
                                 ChecksumAlgorithm.NONE),
                         null,
+                        "v=1;c=none;h=none;l=3"),
+                Arguments.of(
+                        "v=1;c=none;h=none;l=3;future-flag=",
+                        new CodecConfiguration(
+                                CodecAttributes.VERSION_VALUE,
+                                CompressionAlgorithm.NONE,
+                                ChecksumAlgorithm.NONE),
+                        null,
                         "v=1;c=none;h=none;l=3"));
     }
 

@@ -100,7 +100,13 @@ public class CodecMetadataAttributeHandler {
             }
             String key = entry.substring(0, idx).trim().toLowerCase(Locale.ROOT);
             String value = entry.substring(idx + 1).trim();
-            if (key.isEmpty() || (value.isEmpty()
+            boolean knownKey = CodecAttributes.META_VERSION_KEY.equals(key)
+                    || CodecAttributes.META_COMPRESSION_KEY.equals(key)
+                    || CodecAttributes.META_CHECKSUM_ALGORITHM_KEY.equals(key)
+                    || CodecAttributes.META_CHECKSUM_VALUE_KEY.equals(key)
+                    || CodecAttributes.META_RAW_LENGTH_KEY.equals(key);
+            if (key.isEmpty() || (knownKey
+                    && value.isEmpty()
                     && !CodecAttributes.META_CHECKSUM_VALUE_KEY.equals(key)
                     && !CodecAttributes.META_RAW_LENGTH_KEY.equals(key))) {
                 throw UnsupportedCodecMetadataException.malformed(metadataValue);

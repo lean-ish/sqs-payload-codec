@@ -163,7 +163,7 @@ class SqsCodecInterceptorIntegrationTest {
         try (SqsClient sender = rawSqsClient();
                 SqsClient receiver = sqsClient(
                         CompressionAlgorithm.NONE,
-                        ChecksumAlgorithm.MD5)) {
+                        ChecksumAlgorithm.NONE)) {
             String queueUrl = createQueue(sender);
 
             sender.sendMessage(SendMessageRequest.builder()
@@ -208,8 +208,44 @@ class SqsCodecInterceptorIntegrationTest {
         }
     }
 
+    @Test
+    void receiveWithoutExplicitAttributeRequest() {
+        String payload = "{\"value\":42}";
+
+        try (SqsClient client = sqsClient(
+                CompressionAlgorithm.ZSTD,
+                ChecksumAlgorithm.MD5)) {
+            String queueUrl = createQueue(client);
+
+            client.sendMessage(SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(payload)
+                    .build());
+
+            Message message = receiveSingleMessageWithoutAttributeNames(client, queueUrl);
+
+            assertThat(message.body()).isEqualTo(payload);
+            assertThat(message.messageAttributes()).containsKey(CodecAttributes.META);
+        }
+    }
+
     private static Message receiveSingleMessage(SqsClient client, String queueUrl) {
         return receiveMessages(client, queueUrl, 1).get(0);
+    }
+
+    private static Message receiveSingleMessageWithoutAttributeNames(SqsClient client, String queueUrl) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < deadline) {
+            ReceiveMessageResponse response = client.receiveMessage(ReceiveMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .maxNumberOfMessages(1)
+                    .waitTimeSeconds(1)
+                    .build());
+            if (!response.messages().isEmpty()) {
+                return response.messages().get(0);
+            }
+        }
+        throw new AssertionError("Expected one message from queue " + queueUrl + " without explicit attribute request");
     }
 
     private static List<Message> receiveMessages(SqsClient client, String queueUrl, int expectedCount) {

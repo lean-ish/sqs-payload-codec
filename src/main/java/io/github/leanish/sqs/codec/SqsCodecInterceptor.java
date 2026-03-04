@@ -54,6 +54,10 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private final ChecksumAlgorithm checksumAlgorithm;
     private final boolean skipCompressionWhenLarger;
 
+    public static SqsCodecInterceptor defaultInterceptor() {
+        return DEFAULT;
+    }
+
     @Override
     public SdkRequest modifyRequest(Context.ModifyRequest context, ExecutionAttributes executionAttributes) {
         SdkRequest request = context.request();
@@ -279,10 +283,6 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
                 "SQS supports at most " + MAX_SQS_MESSAGE_ATTRIBUTES
                         + " message attributes, but request has " + attributeCount
                         + "; reduce custom attributes");
-    }
-
-    public static SqsCodecInterceptor defaultInterceptor() {
-        return DEFAULT;
     }
 
     private record EncodedMessage(String body, Map<String, MessageAttributeValue> attributes) {

@@ -19,7 +19,7 @@ class CodecTest {
 
     @Test
     void encode_default() {
-        Codec codec = new Codec();
+        Codec codec = new Codec(CompressionAlgorithm.NONE);
         String payload = "payload-42";
         byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
 
