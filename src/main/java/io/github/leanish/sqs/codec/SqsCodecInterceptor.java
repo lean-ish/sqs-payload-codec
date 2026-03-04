@@ -54,6 +54,10 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
     private final ChecksumAlgorithm checksumAlgorithm;
     private final boolean skipCompressionWhenLarger;
 
+    public static SqsCodecInterceptor defaultInterceptor() {
+        return DEFAULT;
+    }
+
     @Override
     public SdkRequest modifyRequest(Context.ModifyRequest context, ExecutionAttributes executionAttributes) {
         SdkRequest request = context.request();
@@ -281,11 +285,10 @@ public class SqsCodecInterceptor implements ExecutionInterceptor {
                         + "; reduce custom attributes");
     }
 
-    public static SqsCodecInterceptor defaultInterceptor() {
-        return DEFAULT;
+    private record EncodedMessage(String body, Map<String, MessageAttributeValue> attributes) {
     }
 
-    private record EncodedMessage(String body, Map<String, MessageAttributeValue> attributes) {
+    private record EncodedPayload(CodecConfiguration configuration, String body) {
     }
 
     private record EncodedPayload(CodecConfiguration configuration, String body) {

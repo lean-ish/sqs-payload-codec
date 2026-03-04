@@ -108,7 +108,7 @@ class SqsCodecInterceptorTest {
 
     @Test
     void modifyRequest_prefersOriginalPayloadWhenCompressedPayloadHasEqualSize() {
-        String payload = payloadWithEqualEncodedLength(CompressionAlgorithm.GZIP);
+        String payload = payloadWithEqualEncodedLengthForGzip();
         byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
         SqsCodecInterceptor interceptor = SqsCodecInterceptor.defaultInterceptor()
                 .withCompressionAlgorithm(CompressionAlgorithm.GZIP);
@@ -465,6 +465,51 @@ class SqsCodecInterceptorTest {
                 .isEqualTo(PAYLOAD);
         assertThat(skippedEntry)
                 .isSameAs(request.entries().get(1));
+    }
+
+    @Test
+    void modifyRequest_batch_prefersOriginalPayloadPerEntryWhenCompressedPayloadIsLarger() {
+        String compressiblePayload = "a".repeat(2048);
+        byte[] compressiblePayloadBytes = compressiblePayload.getBytes(StandardCharsets.UTF_8);
+        byte[] incompressiblePayloadBytes = PAYLOAD.getBytes(StandardCharsets.UTF_8);
+        SendMessageBatchRequest request = SendMessageBatchRequest.builder()
+                .entries(
+                        SendMessageBatchRequestEntry.builder()
+                                .id("incompressible")
+                                .messageBody(PAYLOAD)
+                                .build(),
+                        SendMessageBatchRequestEntry.builder()
+                                .id("compressible")
+                                .messageBody(compressiblePayload)
+                                .build())
+                .build();
+        SqsCodecInterceptor interceptor = SqsCodecInterceptor.defaultInterceptor()
+                .withCompressionAlgorithm(CompressionAlgorithm.ZSTD);
+
+        SendMessageBatchRequest encoded = (SendMessageBatchRequest) interceptor.modifyRequest(
+                new ModifyRequestContext(request),
+                new ExecutionAttributes());
+        SendMessageBatchRequestEntry incompressibleEntry = encoded.entries().stream()
+                .filter(entry -> "incompressible".equals(entry.id()))
+                .findFirst()
+                .orElseThrow();
+        SendMessageBatchRequestEntry compressibleEntry = encoded.entries().stream()
+                .filter(entry -> "compressible".equals(entry.id()))
+                .findFirst()
+                .orElseThrow();
+
+        String incompressibleChecksum = ChecksumAlgorithm.MD5.implementation().checksum(incompressiblePayloadBytes);
+        assertThat(incompressibleEntry.messageBody()).isEqualTo(PAYLOAD);
+        assertThat(incompressibleEntry.messageAttributes().get(CodecAttributes.META).stringValue())
+                .isEqualTo("v=1;c=none;h=md5;s=" + incompressibleChecksum + ";l=" + incompressiblePayloadBytes.length);
+
+        String compressibleChecksum = ChecksumAlgorithm.MD5.implementation().checksum(compressiblePayloadBytes);
+        assertThat(compressibleEntry.messageBody()).isNotEqualTo(compressiblePayload);
+        assertThat(compressibleEntry.messageAttributes().get(CodecAttributes.META).stringValue())
+                .isEqualTo("v=1;c=zstd;h=md5;s=" + compressibleChecksum + ";l=" + compressiblePayloadBytes.length);
+        Codec codec = new Codec(CompressionAlgorithm.ZSTD);
+        assertThat(new String(codec.decode(compressibleEntry.messageBody().getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8))
+                .isEqualTo(compressiblePayload);
     }
 
     @ParameterizedTest(name = "message={0}, interceptor={1}")
@@ -963,8 +1008,8 @@ class SqsCodecInterceptorTest {
                         "Duplicate codec metadata key: c"));
     }
 
-    private static String payloadWithEqualEncodedLength(CompressionAlgorithm compressionAlgorithm) {
-        Codec codec = new Codec(compressionAlgorithm);
+    private static String payloadWithEqualEncodedLengthForGzip() {
+        Codec codec = new Codec(CompressionAlgorithm.GZIP);
         for (int length = 1; length <= 4096; length++) {
             String payload = "a".repeat(length);
             byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
@@ -972,7 +1017,7 @@ class SqsCodecInterceptorTest {
                 return payload;
             }
         }
-        throw new IllegalStateException("No payload produced equal compressed size for " + compressionAlgorithm.id());
+        throw new AssertionError("Expected to find a GZIP payload with equal encoded length within 4096 bytes");
     }
 
     private static Map<String, MessageAttributeValue> codecAttributes(

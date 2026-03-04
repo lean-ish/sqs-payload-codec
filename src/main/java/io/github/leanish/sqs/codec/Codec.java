@@ -14,19 +14,15 @@ class Codec {
     private static final Base64Encoder BASE64_ENCODER = new Base64Encoder();
 
     private final Compressor compressor;
-    private final boolean requiresEncoding;
-
-    Codec() {
-        this(CompressionAlgorithm.NONE);
-    }
+    private final boolean compressionEnabled;
 
     Codec(CompressionAlgorithm compressionAlgorithm) {
         this.compressor = compressionAlgorithm.implementation();
-        this.requiresEncoding = compressionAlgorithm != CompressionAlgorithm.NONE;
+        this.compressionEnabled = compressionAlgorithm != CompressionAlgorithm.NONE;
     }
 
     public byte[] encode(byte[] payload) {
-        if (!requiresEncoding) {
+        if (!compressionEnabled) {
             return payload;
         }
 
@@ -35,7 +31,7 @@ class Codec {
     }
 
     public byte[] decode(byte[] payload) {
-        if (!requiresEncoding) {
+        if (!compressionEnabled) {
             return payload;
         }
 
